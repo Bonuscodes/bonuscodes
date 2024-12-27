@@ -6,7 +6,6 @@ from aiogram.dispatcher import FSMContext
 from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from aiogram.utils import executor
 from aiogram.dispatcher.filters.state import State, StatesGroup
-from aiogram.dispatcher.filters import Text
 from aiogram.contrib.fsm_storage.memory import MemoryStorage  # Подключаем MemoryStorage
 
 API_TOKEN = '8007886958:AAEy-Yob9wAOpDWThKX3vVB0ApJB3E6b3Qc'  # Токен вашего бота
@@ -22,30 +21,24 @@ def debug_print(message):
     print(f"DEBUG: {message}")
 
 # Создаем таблицы в базе данных и добавляем столбцы, если их нет
-conn = sqlite3.connect('codes.db')
-cursor = conn.cursor()
+def init_db():
+    with sqlite3.connect('codes.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute('''CREATE TABLE IF NOT EXISTS codes (
+                            code TEXT PRIMARY KEY, 
+                            site_url TEXT)''')
+        
+        cursor.execute('''PRAGMA table_info(codes)''')
+        columns = [column[1] for column in cursor.fetchall()]
+        debug_print(f"Текущие столбцы в таблице codes: {columns}")
 
-# Создание таблицы с кодами, если ее нет
-cursor.execute('''CREATE TABLE IF NOT EXISTS codes (
-                    code TEXT PRIMARY KEY, 
-                    site_url TEXT)''')
+        if 'site_url' not in columns:
+            cursor.execute('ALTER TABLE codes ADD COLUMN site_url TEXT')
+            debug_print("Столбец site_url был добавлен в таблицу.")
+        
+        cursor.execute('''CREATE TABLE IF NOT EXISTS used_ips (user_id INTEGER PRIMARY KEY)''')
 
-# Проверяем, есть ли столбец site_url в таблице
-cursor.execute('''PRAGMA table_info(codes)''')
-columns = [column[1] for column in cursor.fetchall()]
-debug_print(f"Текущие столбцы в таблице codes: {columns}")
-
-# Если столбца site_url нет, добавляем его
-if 'site_url' not in columns:
-    cursor.execute('ALTER TABLE codes ADD COLUMN site_url TEXT')
-    debug_print("Столбец site_url был добавлен в таблицу.")
-else:
-    debug_print("Столбец site_url уже существует.")
-
-# Создаем таблицу для использованных IP
-cursor.execute('''CREATE TABLE IF NOT EXISTS used_ips (user_id INTEGER PRIMARY KEY)''')
-conn.commit()
-conn.close()
+init_db()
 
 # Состояния для FSM
 class Form(StatesGroup):
@@ -55,11 +48,10 @@ class Form(StatesGroup):
 # Функция для добавления кода и сайта в базу данных
 def add_code_to_db(code, site_url):
     debug_print(f"Добавление кода: {code}, сайта: {site_url}")
-    conn = sqlite3.connect('codes.db')
-    cursor = conn.cursor()
-    cursor.execute("INSERT OR IGNORE INTO codes (code, site_url) VALUES (?, ?)", (code, site_url))
-    conn.commit()
-    conn.close()
+    with sqlite3.connect('codes.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR IGNORE INTO codes (code, site_url) VALUES (?, ?)", (code, site_url))
+        conn.commit()
 
 # Команда /addcode для администраторов
 @dp.message_handler(commands=['addcode'])
@@ -95,35 +87,30 @@ async def process_url(message: types.Message, state: FSMContext):
 
 # Функция для раздачи кодов с уникальными сайтами
 def get_code():
-    conn = sqlite3.connect('codes.db')
-    cursor = conn.cursor()
-    cursor.execute("SELECT code, site_url FROM codes LIMIT 1")
-    code = cursor.fetchone()
-    if code:
-        cursor.execute("DELETE FROM codes WHERE code = ?", (code[0],))
-        conn.commit()
-        conn.close()
-        return code
-    else:
-        conn.close()
+    with sqlite3.connect('codes.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT code, site_url FROM codes LIMIT 1")
+        code = cursor.fetchone()
+        if code:
+            cursor.execute("DELETE FROM codes WHERE code = ?", (code[0],))
+            conn.commit()
+            return code
         return None
 
 # Проверка, использовался ли код для данного пользователя
 def is_code_used(user_id):
-    conn = sqlite3.connect('codes.db')
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM used_ips WHERE user_id = ?", (user_id,))
-    result = cursor.fetchone()
-    conn.close()
+    with sqlite3.connect('codes.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM used_ips WHERE user_id = ?", (user_id,))
+        result = cursor.fetchone()
     return result is not None
 
 # Добавление пользователя в базу данных
 def add_user(user_id):
-    conn = sqlite3.connect('codes.db')
-    cursor = conn.cursor()
-    cursor.execute("INSERT OR IGNORE INTO used_ips (user_id) VALUES (?)", (user_id,))
-    conn.commit()
-    conn.close()
+    with sqlite3.connect('codes.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR IGNORE INTO used_ips (user_id) VALUES (?)", (user_id,))
+        conn.commit()
 
 # Обработчик команды /start
 @dp.message_handler(commands=["start"])
@@ -182,11 +169,10 @@ async def send_code(callback_query: types.CallbackQuery):
 @dp.message_handler(commands=['viewcodes'])
 async def cmd_view_codes(message: types.Message):
     if message.from_user.id in ADMIN_IDS:  # Проверка, является ли пользователь администратором
-        conn = sqlite3.connect('codes.db')
-        cursor = conn.cursor()
-        cursor.execute("SELECT code, site_url FROM codes")  # Получаем все коды и ссылки
-        codes = cursor.fetchall()
-        conn.close()
+        with sqlite3.connect('codes.db') as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT code, site_url FROM codes")  # Получаем все коды и ссылки
+            codes = cursor.fetchall()
 
         if codes:
             response = "Список всех кодов:\n\n"
@@ -202,11 +188,10 @@ async def cmd_view_codes(message: types.Message):
 @dp.message_handler(commands=['clearcodes'])
 async def cmd_clear_codes(message: types.Message):
     if message.from_user.id in ADMIN_IDS:  # Проверка, является ли пользователь администратором
-        conn = sqlite3.connect('codes.db')
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM codes")  # Удаляем все коды из базы данных
-        conn.commit()
-        conn.close()
+        with sqlite3.connect('codes.db') as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM codes")  # Удаляем все коды из базы данных
+            conn.commit()
 
         await message.answer("✅ Все коды были успешно удалены.")
     else:
