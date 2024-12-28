@@ -6,21 +6,19 @@ from aiogram.dispatcher import FSMContext
 from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from aiogram.utils import executor
 from aiogram.dispatcher.filters.state import State, StatesGroup
-from aiogram.contrib.fsm_storage.memory import MemoryStorage  # Подключаем MemoryStorage
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
 
 API_TOKEN = '8007886958:AAEy-Yob9wAOpDWThKX3vVB0ApJB3E6b3Qc'  # Токен вашего бота
 ADMIN_IDS = [781745483]  # Замените на реальные ID администраторов
 
 bot = Bot(token=API_TOKEN)
-storage = MemoryStorage()  # Создаем объект MemoryStorage
-dp = Dispatcher(bot, storage=storage)  # Указываем хранилище для dispatcher
+storage = MemoryStorage()
+dp = Dispatcher(bot, storage=storage)
 dp.middleware.setup(LoggingMiddleware())
 
-# Функция для отладки
 def debug_print(message):
     print(f"DEBUG: {message}")
 
-# Создаем таблицы в базе данных и добавляем столбцы, если их нет
 def init_db():
     with sqlite3.connect('codes.db') as conn:
         cursor = conn.cursor()
@@ -36,14 +34,26 @@ def init_db():
             cursor.execute('ALTER TABLE codes ADD COLUMN site_url TEXT')
             debug_print("Столбец site_url был добавлен в таблицу.")
         
-        cursor.execute('''CREATE TABLE IF NOT EXISTS used_ips (user_id INTEGER PRIMARY KEY)''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS used_ips (
+                            user_id INTEGER, 
+                            ip_address TEXT,
+                            PRIMARY KEY (user_id, ip_address))''')
+        conn.commit()
 
-init_db()
+# Проверка, использовался ли код для данного пользователя с данным IP
+def is_code_used(user_id, ip_address):
+    with sqlite3.connect('codes.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM used_ips WHERE user_id = ? AND ip_address = ?", (user_id, ip_address))
+        result = cursor.fetchone()
+    return result is not None
 
-# Состояния для FSM
-class Form(StatesGroup):
-    waiting_for_code = State()
-    waiting_for_site = State()
+# Добавление пользователя и его IP-адреса в базу данных
+def add_user(user_id, ip_address):
+    with sqlite3.connect('codes.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR IGNORE INTO used_ips (user_id, ip_address) VALUES (?, ?)", (user_id, ip_address))
+        conn.commit()
 
 # Функция для добавления кода и сайта в базу данных
 def add_code_to_db(code, site_url):
@@ -53,7 +63,12 @@ def add_code_to_db(code, site_url):
         cursor.execute("INSERT OR IGNORE INTO codes (code, site_url) VALUES (?, ?)", (code, site_url))
         conn.commit()
 
-# Команда /addcode для администраторов
+# Состояния для FSM
+class Form(StatesGroup):
+    waiting_for_code = State()
+    waiting_for_site = State()
+
+# Обработчик команды /addcode для администраторов
 @dp.message_handler(commands=['addcode'])
 async def cmd_add_code(message: types.Message):
     if message.from_user.id in ADMIN_IDS:  # Проверка, является ли пользователь администратором
@@ -97,21 +112,6 @@ def get_code():
             return code
         return None
 
-# Проверка, использовался ли код для данного пользователя
-def is_code_used(user_id):
-    with sqlite3.connect('codes.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM used_ips WHERE user_id = ?", (user_id,))
-        result = cursor.fetchone()
-    return result is not None
-
-# Добавление пользователя в базу данных
-def add_user(user_id):
-    with sqlite3.connect('codes.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute("INSERT OR IGNORE INTO used_ips (user_id) VALUES (?)", (user_id,))
-        conn.commit()
-
 # Обработчик команды /start
 @dp.message_handler(commands=["start"])
 async def start_command(message: types.Message):
@@ -131,7 +131,10 @@ async def start_command(message: types.Message):
 async def send_code(callback_query: types.CallbackQuery):
     user_id = callback_query.from_user.id
 
-    if is_code_used(user_id):
+    # Для теста используем фиктивный IP-адрес
+    ip_address = "unknown_ip"  # Здесь замените на реальный IP, если используете webhook
+
+    if is_code_used(user_id, ip_address):  # Проверяем, использовался ли код для этого пользователя и IP
         await bot.send_message(
             callback_query.from_user.id,
             "🚨 <b>Вы уже получили код!</b> 🚨\n\n"
@@ -144,7 +147,7 @@ async def send_code(callback_query: types.CallbackQuery):
 
     if code_data:
         code, site_url = code_data
-        # Красивое сообщение с кодом и кнопкой для перехода на уникальный сайт
+        # Красивое сообщение с кодом и кнопкой для перехода на сайт
         keyboard = InlineKeyboardMarkup().add(
             InlineKeyboardButton("Перейти на сайт 🌐", url=site_url)
         )
@@ -156,7 +159,7 @@ async def send_code(callback_query: types.CallbackQuery):
             parse_mode=ParseMode.HTML,
             reply_markup=keyboard
         )
-        add_user(user_id)  # Добавляем пользователя в базу данных как использовавшего код
+        add_user(user_id, ip_address)  # Добавляем пользователя и его IP в базу данных
     else:
         await bot.send_message(
             callback_query.from_user.id,
