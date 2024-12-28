@@ -1,13 +1,15 @@
+import logging
 import sqlite3
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import ParseMode, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.dispatcher.filters import Command
-from aiogram.dispatcher import FSMContext
-from aiogram.contrib.middlewares.logging import LoggingMiddleware
-from aiogram.utils import executor
-from aiogram.dispatcher.filters.state import State, StatesGroup
-from aiogram.dispatcher.filters import Text
-from aiogram.contrib.fsm_storage.memory import MemoryStorage  # Подключаем MemoryStorage
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram import Dispatcher
+from aiogram.fsm.storage.memory import MemoryStorage  # Используем хранилище
+
+# Настроим логгирование
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 API_TOKEN = '8007886958:AAEy-Yob9wAOpDWThKX3vVB0ApJB3E6b3Qc'  # Токен вашего бота
 ADMIN_IDS = [781745483]  # Замените на реальные ID администраторов
@@ -15,7 +17,6 @@ ADMIN_IDS = [781745483]  # Замените на реальные ID админ�
 bot = Bot(token=API_TOKEN)
 storage = MemoryStorage()  # Создаем объект MemoryStorage
 dp = Dispatcher(bot, storage=storage)  # Указываем хранилище для dispatcher
-dp.middleware.setup(LoggingMiddleware())
 
 # Функция для отладки
 def debug_print(message):
@@ -149,7 +150,7 @@ async def send_code(callback_query: types.CallbackQuery):
             callback_query.from_user.id,
             "🚨 <b>Вы уже получили код!</b> 🚨\n\n"
             "Каждый пользователь может получить код только один раз. Спасибо за понимание! 😊",
-            parse_mode=ParseMode.HTML
+            parse_mode="HTML"
         )
         return
 
@@ -166,7 +167,7 @@ async def send_code(callback_query: types.CallbackQuery):
             f"<b>Ваш уникальный код:</b> <code>{code}</code>\n\n"
             f"🎉 Наслаждайтесь! Приятных покупок! 💸\n"
             f"Переходите на наш сайт: {site_url}",
-            parse_mode=ParseMode.HTML,
+            parse_mode="HTML",
             reply_markup=keyboard
         )
         add_user(user_id)  # Добавляем пользователя в базу данных как использовавшего код
@@ -175,7 +176,7 @@ async def send_code(callback_query: types.CallbackQuery):
             callback_query.from_user.id,
             "🚨 <b>Коды закончились!</b> 🚨\n\n"
             "К сожалению, все коды использованы. Попробуйте позже.",
-            parse_mode=ParseMode.HTML
+            parse_mode="HTML"
         )
 
 # Команда /viewcodes для администраторов (для просмотра всех кодов)
@@ -192,7 +193,7 @@ async def cmd_view_codes(message: types.Message):
             response = "Список всех кодов:\n\n"
             for code, site_url in codes:
                 response += f"🔑 Код: <code>{code}</code>\n🌐 Сайт: {site_url}\n\n"
-            await message.answer(response, parse_mode=ParseMode.HTML)
+            await message.answer(response, parse_mode="HTML")
         else:
             await message.answer("🚨 Нет доступных кодов в базе данных.")
     else:
@@ -214,4 +215,4 @@ async def cmd_clear_codes(message: types.Message):
 
 # Запуск бота
 if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True)
+    dp.run_polling(skip_updates=True)
