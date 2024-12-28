@@ -168,7 +168,7 @@ async def add_code(message: types.Message):
 
     # Запрашиваем код и URL у администратора
     await message.reply("🔹 Введите новый код (например: ABC123):")
-    await dp.register_message_handler(process_code, state="code", user_id=message.from_user.id)
+    await dp.register_message_handler(process_code, user_id=message.from_user.id)
 
 async def process_code(message: types.Message):
     code = message.text.strip()
@@ -183,11 +183,12 @@ async def process_code(message: types.Message):
 
     # Попросим URL для нового кода
     await message.reply("🔹 Теперь введите URL для использования этого кода:")
-    await dp.register_message_handler(process_url, state="url", user_id=message.from_user.id, code=code)
+
+    # Ожидаем ответ с URL
+    await dp.register_message_handler(process_url, user_id=message.from_user.id, code=code)
 
 async def process_url(message: types.Message, state: FSMContext):
     url = message.text.strip()
-
     code = (await state.get_data())["code"]
 
     # Добавление кода в базу данных
