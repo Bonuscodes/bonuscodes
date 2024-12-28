@@ -1,4 +1,5 @@
 import sqlite3
+import requests  # Библиотека для получения IP-адреса пользователя
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ParseMode, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.dispatcher.filters import Command
@@ -42,7 +43,7 @@ else:
     debug_print("Столбец site_url уже существует.")
 
 # Создаем таблицу для использованных IP
-cursor.execute('''CREATE TABLE IF NOT EXISTS used_ips (user_id INTEGER PRIMARY KEY)''')
+cursor.execute('''CREATE TABLE IF NOT EXISTS used_ips (user_id INTEGER PRIMARY KEY, ip_address TEXT)''')
 conn.commit()
 conn.close()
 
@@ -57,6 +58,32 @@ def add_code_to_db(code, site_url):
     conn = sqlite3.connect('codes.db')
     cursor = conn.cursor()
     cursor.execute("INSERT OR IGNORE INTO codes (code, site_url) VALUES (?, ?)", (code, site_url))
+    conn.commit()
+    conn.close()
+
+# Функция для получения IP-адреса пользователя
+def get_ip_address(user_id):
+    try:
+        response = requests.get(f'http://ipinfo.io/{user_id}/json')
+        return response.json()['ip']
+    except requests.exceptions.RequestException as e:
+        debug_print(f"Ошибка при получении IP: {e}")
+        return None
+
+# Функция для проверки, был ли код использован с данного IP
+def is_code_used_from_ip(ip_address):
+    conn = sqlite3.connect('codes.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM used_ips WHERE ip_address = ?", (ip_address,))
+    result = cursor.fetchone()
+    conn.close()
+    return result is not None
+
+# Добавление IP в базу данных
+def add_ip_to_db(ip_address, user_id):
+    conn = sqlite3.connect('codes.db')
+    cursor = conn.cursor()
+    cursor.execute("INSERT OR IGNORE INTO used_ips (ip_address, user_id) VALUES (?, ?)", (ip_address, user_id))
     conn.commit()
     conn.close()
 
@@ -116,14 +143,6 @@ def is_code_used(user_id):
     conn.close()
     return result is not None
 
-# Добавление пользователя в базу данных
-def add_user(user_id):
-    conn = sqlite3.connect('codes.db')
-    cursor = conn.cursor()
-    cursor.execute("INSERT OR IGNORE INTO used_ips (user_id) VALUES (?)", (user_id,))
-    conn.commit()
-    conn.close()
-
 # Обработчик команды /start
 @dp.message_handler(commands=["start"])
 async def start_command(message: types.Message):
@@ -143,11 +162,21 @@ async def start_command(message: types.Message):
 async def send_code(callback_query: types.CallbackQuery):
     user_id = callback_query.from_user.id
 
-    if is_code_used(user_id):
+    # Получаем IP-адрес пользователя
+    ip_address = get_ip_address(user_id)
+    if ip_address is None:
         await bot.send_message(
             callback_query.from_user.id,
-            "🚨 <b>Вы уже получили код!</b> 🚨\n\n"
-            "Каждый пользователь может получить код только один раз. Спасибо за понимание! 😊",
+            "🚨 Не удалось получить ваш IP-адрес. Попробуйте позже.",
+        )
+        return
+
+    # Проверяем, использовался ли код с этого IP
+    if is_code_used_from_ip(ip_address):
+        await bot.send_message(
+            callback_query.from_user.id,
+            "🚨 <b>Вы уже получили код с этого IP-адреса!</b> 🚨\n\n"
+            "Каждый IP-адрес может получить код только один раз. Спасибо за понимание! 😊",
             parse_mode=ParseMode.HTML
         )
         return
@@ -169,6 +198,7 @@ async def send_code(callback_query: types.CallbackQuery):
             reply_markup=keyboard
         )
         add_user(user_id)  # Добавляем пользователя в базу данных как использовавшего код
+        add_ip_to_db(ip_address, user_id)  # Добавляем IP в базу данных
     else:
         await bot.send_message(
             callback_query.from_user.id,
@@ -176,41 +206,3 @@ async def send_code(callback_query: types.CallbackQuery):
             "К сожалению, все коды использованы. Попробуйте позже.",
             parse_mode=ParseMode.HTML
         )
-
-# Команда /viewcodes для администраторов (для просмотра всех кодов)
-@dp.message_handler(commands=['viewcodes'])
-async def cmd_view_codes(message: types.Message):
-    if message.from_user.id in ADMIN_IDS:  # Проверка, является ли пользователь администратором
-        conn = sqlite3.connect('codes.db')
-        cursor = conn.cursor()
-        cursor.execute("SELECT code, site_url FROM codes")  # Получаем все коды и ссылки
-        codes = cursor.fetchall()
-        conn.close()
-
-        if codes:
-            response = "Список всех кодов:\n\n"
-            for code, site_url in codes:
-                response += f"🔑 Код: <code>{code}</code>\n🌐 Сайт: {site_url}\n\n"
-            await message.answer(response, parse_mode=ParseMode.HTML)
-        else:
-            await message.answer("🚨 Нет доступных кодов в базе данных.")
-    else:
-        await message.answer("❌ У вас нет прав для использования этой команды.")
-
-# Команда /clearcodes для администраторов (для удаления всех кодов)
-@dp.message_handler(commands=['clearcodes'])
-async def cmd_clear_codes(message: types.Message):
-    if message.from_user.id in ADMIN_IDS:  # Проверка, является ли пользователь администратором
-        conn = sqlite3.connect('codes.db')
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM codes")  # Удаляем все коды из базы данных
-        conn.commit()
-        conn.close()
-
-        await message.answer("✅ Все коды были успешно удалены.")
-    else:
-        await message.answer("❌ У вас нет прав для использования этой команды.")
-
-# Запуск бота
-if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True)
