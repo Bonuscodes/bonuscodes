@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 # Функция для подключения к базе данных
 def get_db_connection():
-    return sqlite3.connect('codes.db')
+    return sqlite3.connect('codes.db', check_same_thread=False)  # Добавление параметра check_same_thread=False для многозадачности
 
 # Создание таблиц в базе данных, если их нет
 def create_tables():
@@ -236,4 +236,4 @@ async def confirm_clear_codes(message: types.Message, state: FSMContext):
 # Запуск бота
 if __name__ == "__main__":
     create_tables()  # Создание таблиц при запуске бота
-    executor.start_polling(dp, skip_updates=True)
+    executor.start_polling(dp, skip_updates=True)  # Запуск polling с пропуском старых обновлений
