@@ -20,48 +20,61 @@ def debug_print(message):
     print(f"DEBUG: {message}")
 
 def init_db():
-    with sqlite3.connect('codes.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute('''CREATE TABLE IF NOT EXISTS codes (
-                            code TEXT PRIMARY KEY, 
-                            site_url TEXT)''')
-        
-        cursor.execute('''PRAGMA table_info(codes)''')
-        columns = [column[1] for column in cursor.fetchall()]
-        debug_print(f"Текущие столбцы в таблице codes: {columns}")
+    try:
+        with sqlite3.connect('codes.db') as conn:
+            cursor = conn.cursor()
+            cursor.execute('''CREATE TABLE IF NOT EXISTS codes (
+                                code TEXT PRIMARY KEY, 
+                                site_url TEXT)''')
+            
+            cursor.execute('''PRAGMA table_info(codes)''')
+            columns = [column[1] for column in cursor.fetchall()]
+            debug_print(f"Текущие столбцы в таблице codes: {columns}")
 
-        if 'site_url' not in columns:
-            cursor.execute('ALTER TABLE codes ADD COLUMN site_url TEXT')
-            debug_print("Столбец site_url был добавлен в таблицу.")
-        
-        cursor.execute('''CREATE TABLE IF NOT EXISTS used_ips (
-                            user_id INTEGER, 
-                            ip_address TEXT,
-                            PRIMARY KEY (user_id, ip_address))''')
-        conn.commit()
+            if 'site_url' not in columns:
+                cursor.execute('ALTER TABLE codes ADD COLUMN site_url TEXT')
+                debug_print("Столбец site_url был добавлен в таблицу.")
+            
+            cursor.execute('''CREATE TABLE IF NOT EXISTS used_ips (
+                                user_id INTEGER, 
+                                ip_address TEXT,
+                                PRIMARY KEY (user_id, ip_address))''')
+            conn.commit()
+    except sqlite3.Error as e:
+        debug_print(f"Ошибка при инициализации базы данных: {e}")
 
 # Проверка, использовался ли код для данного пользователя с данным IP
 def is_code_used(user_id, ip_address):
-    with sqlite3.connect('codes.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM used_ips WHERE user_id = ? AND ip_address = ?", (user_id, ip_address))
-        result = cursor.fetchone()
-    return result is not None
+    try:
+        with sqlite3.connect('codes.db') as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM used_ips WHERE user_id = ? AND ip_address = ?", (user_id, ip_address))
+            result = cursor.fetchone()
+        return result is not None
+    except sqlite3.Error as e:
+        debug_print(f"Ошибка при проверке использования кода: {e}")
+        return False
 
 # Добавление пользователя и его IP-адреса в базу данных
 def add_user(user_id, ip_address):
-    with sqlite3.connect('codes.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute("INSERT OR IGNORE INTO used_ips (user_id, ip_address) VALUES (?, ?)", (user_id, ip_address))
-        conn.commit()
+    try:
+        with sqlite3.connect('codes.db') as conn:
+            cursor = conn.cursor()
+            cursor.execute("INSERT OR IGNORE INTO used_ips (user_id, ip_address) VALUES (?, ?)", (user_id, ip_address))
+            conn.commit()
+    except sqlite3.Error as e:
+        debug_print(f"Ошибка при добавлении пользователя в базу данных: {e}")
 
 # Функция для добавления кода и сайта в базу данных
 def add_code_to_db(code, site_url):
-    debug_print(f"Добавление кода: {code}, сайта: {site_url}")
-    with sqlite3.connect('codes.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute("INSERT OR IGNORE INTO codes (code, site_url) VALUES (?, ?)", (code, site_url))
-        conn.commit()
+    try:
+        debug_print(f"Добавление кода: {code}, сайта: {site_url}")
+        with sqlite3.connect('codes.db') as conn:
+            cursor = conn.cursor()
+            cursor.execute("INSERT OR IGNORE INTO codes (code, site_url) VALUES (?, ?)", (code, site_url))
+            conn.commit()
+    except sqlite3.Error as e:
+        debug_print(f"Ошибка при добавлении кода в базу данных: {e}")
 
 # Состояния для FSM
 class Form(StatesGroup):
@@ -102,14 +115,18 @@ async def process_url(message: types.Message, state: FSMContext):
 
 # Функция для раздачи кодов с уникальными сайтами
 def get_code():
-    with sqlite3.connect('codes.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT code, site_url FROM codes LIMIT 1")
-        code = cursor.fetchone()
-        if code:
-            cursor.execute("DELETE FROM codes WHERE code = ?", (code[0],))
-            conn.commit()
-            return code
+    try:
+        with sqlite3.connect('codes.db') as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT code, site_url FROM codes LIMIT 1")
+            code = cursor.fetchone()
+            if code:
+                cursor.execute("DELETE FROM codes WHERE code = ?", (code[0],))
+                conn.commit()
+                return code
+        return None
+    except sqlite3.Error as e:
+        debug_print(f"Ошибка при получении кода: {e}")
         return None
 
 # Обработчик команды /start
@@ -168,38 +185,7 @@ async def send_code(callback_query: types.CallbackQuery):
             parse_mode=ParseMode.HTML
         )
 
-# Команда /viewcodes для администраторов (для просмотра всех кодов)
-@dp.message_handler(commands=['viewcodes'])
-async def cmd_view_codes(message: types.Message):
-    if message.from_user.id in ADMIN_IDS:  # Проверка, является ли пользователь администратором
-        with sqlite3.connect('codes.db') as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT code, site_url FROM codes")  # Получаем все коды и ссылки
-            codes = cursor.fetchall()
-
-        if codes:
-            response = "Список всех кодов:\n\n"
-            for code, site_url in codes:
-                response += f"🔑 Код: <code>{code}</code>\n🌐 Сайт: {site_url}\n\n"
-            await message.answer(response, parse_mode=ParseMode.HTML)
-        else:
-            await message.answer("🚨 Нет доступных кодов в базе данных.")
-    else:
-        await message.answer("❌ У вас нет прав для использования этой команды.")
-
-# Команда /clearcodes для администраторов (для удаления всех кодов)
-@dp.message_handler(commands=['clearcodes'])
-async def cmd_clear_codes(message: types.Message):
-    if message.from_user.id in ADMIN_IDS:  # Проверка, является ли пользователь администратором
-        with sqlite3.connect('codes.db') as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM codes")  # Удаляем все коды из базы данных
-            conn.commit()
-
-        await message.answer("✅ Все коды были успешно удалены.")
-    else:
-        await message.answer("❌ У вас нет прав для использования этой команды.")
-
 # Запуск бота
 if __name__ == "__main__":
+    init_db()
     executor.start_polling(dp, skip_updates=True)
