@@ -1,4 +1,5 @@
 import sqlite3
+import logging
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ParseMode, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.dispatcher.filters import Command
@@ -7,45 +8,35 @@ from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from aiogram.utils import executor
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.dispatcher.filters import Text
-from aiogram.contrib.fsm_storage.memory import MemoryStorage  # Подключаем MemoryStorage
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
 
 API_TOKEN = '8007886958:AAEy-Yob9wAOpDWThKX3vVB0ApJB3E6b3Qc'  # Токен вашего бота
 ADMIN_IDS = [781745483]  # Замените на реальные ID администраторов
+CHANNEL_ID = "@scattercasinostream"  # Название вашего канала
 
 bot = Bot(token=API_TOKEN)
 storage = MemoryStorage()  # Создаем объект MemoryStorage
 dp = Dispatcher(bot, storage=storage)  # Указываем хранилище для dispatcher
 dp.middleware.setup(LoggingMiddleware())
 
-# Функция для отладки
-def debug_print(message):
-    print(f"DEBUG: {message}")
+# Настройка логирования
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
-# Создаем таблицы в базе данных и добавляем столбцы, если их нет
-conn = sqlite3.connect('codes.db')
-cursor = conn.cursor()
+# Функция для подключения к базе данных
+def get_db_connection():
+    return sqlite3.connect('codes.db')
 
-# Создание таблицы с кодами, если ее нет
-cursor.execute('''CREATE TABLE IF NOT EXISTS codes (
-                    code TEXT PRIMARY KEY, 
-                    site_url TEXT)''')
+# Создание таблиц в базе данных, если их нет
+def create_tables():
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''CREATE TABLE IF NOT EXISTS codes (
+                            code TEXT PRIMARY KEY, 
+                            site_url TEXT)''')
 
-# Проверяем, есть ли столбец site_url в таблице
-cursor.execute('''PRAGMA table_info(codes)''')
-columns = [column[1] for column in cursor.fetchall()]
-debug_print(f"Текущие столбцы в таблице codes: {columns}")
-
-# Если столбца site_url нет, добавляем его
-if 'site_url' not in columns:
-    cursor.execute('ALTER TABLE codes ADD COLUMN site_url TEXT')
-    debug_print("Столбец site_url был добавлен в таблицу.")
-else:
-    debug_print("Столбец site_url уже существует.")
-
-# Создаем таблицу для использованных IP
-cursor.execute('''CREATE TABLE IF NOT EXISTS used_ips (user_id INTEGER PRIMARY KEY)''')
-conn.commit()
-conn.close()
+        cursor.execute('''CREATE TABLE IF NOT EXISTS used_ips (user_id INTEGER PRIMARY KEY)''')
+        conn.commit()
 
 # Состояния для FSM
 class Form(StatesGroup):
@@ -54,12 +45,23 @@ class Form(StatesGroup):
 
 # Функция для добавления кода и сайта в базу данных
 def add_code_to_db(code, site_url):
-    debug_print(f"Добавление кода: {code}, сайта: {site_url}")
-    conn = sqlite3.connect('codes.db')
-    cursor = conn.cursor()
-    cursor.execute("INSERT OR IGNORE INTO codes (code, site_url) VALUES (?, ?)", (code, site_url))
-    conn.commit()
-    conn.close()
+    logger.debug(f"Добавление кода: {code}, сайта: {site_url}")
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR IGNORE INTO codes (code, site_url) VALUES (?, ?)", (code, site_url))
+        conn.commit()
+
+# Проверка подписки пользователя на канал
+async def check_subscription(user_id):
+    try:
+        member = await bot.get_chat_member(CHANNEL_ID, user_id)
+        if member.status in ["member", "administrator", "creator"]:
+            return True
+        else:
+            return False
+    except Exception as e:
+        logger.error(f"Ошибка при проверке подписки пользователя {user_id}: {e}")
+        return False
 
 # Команда /addcode для администраторов
 @dp.message_handler(commands=['addcode'])
@@ -95,40 +97,33 @@ async def process_url(message: types.Message, state: FSMContext):
 
 # Функция для раздачи кодов с уникальными сайтами
 def get_code():
-    conn = sqlite3.connect('codes.db')
-    cursor = conn.cursor()
-    cursor.execute("SELECT code, site_url FROM codes LIMIT 1")
-    code = cursor.fetchone()
-    if code:
-        cursor.execute("DELETE FROM codes WHERE code = ?", (code[0],))
-        conn.commit()
-        conn.close()
-        return code
-    else:
-        conn.close()
-        return None
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT code, site_url FROM codes LIMIT 1")
+        code = cursor.fetchone()
+        if code:
+            cursor.execute("DELETE FROM codes WHERE code = ?", (code[0],))
+            conn.commit()
+            return code
+    return None
 
 # Проверка, использовался ли код для данного пользователя
 def is_code_used(user_id):
-    conn = sqlite3.connect('codes.db')
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM used_ips WHERE user_id = ?", (user_id,))
-    result = cursor.fetchone()
-    conn.close()
-    return result is not None
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM used_ips WHERE user_id = ?", (user_id,))
+        return cursor.fetchone() is not None
 
 # Добавление пользователя в базу данных
 def add_user(user_id):
-    conn = sqlite3.connect('codes.db')
-    cursor = conn.cursor()
-    cursor.execute("INSERT OR IGNORE INTO used_ips (user_id) VALUES (?)", (user_id,))
-    conn.commit()
-    conn.close()
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR IGNORE INTO used_ips (user_id) VALUES (?)", (user_id,))
+        conn.commit()
 
 # Обработчик команды /start
 @dp.message_handler(commands=["start"])
 async def start_command(message: types.Message):
-    # Интерактивная клавиатура с кнопками
     keyboard = InlineKeyboardMarkup()
     keyboard.add(InlineKeyboardButton("Получить код 🎟️", callback_data="get_code"))
 
@@ -144,6 +139,15 @@ async def start_command(message: types.Message):
 async def send_code(callback_query: types.CallbackQuery):
     user_id = callback_query.from_user.id
 
+    # Проверяем, подписан ли пользователь на канал
+    if not await check_subscription(user_id):
+        await bot.send_message(
+            callback_query.from_user.id,
+            "🚨 Чтобы получить код, нужно подписаться на наш канал: https://t.me/scattercasinostream 🚨\n\n"
+            "Пожалуйста, подпишитесь на канал, а затем нажмите кнопку 'Получить код' еще раз.",
+        )
+        return
+
     if is_code_used(user_id):
         await bot.send_message(
             callback_query.from_user.id,
@@ -157,7 +161,6 @@ async def send_code(callback_query: types.CallbackQuery):
 
     if code_data:
         code, site_url = code_data
-        # Красивое сообщение с кодом и кнопкой для перехода на уникальный сайт
         keyboard = InlineKeyboardMarkup().add(
             InlineKeyboardButton("Перейти на сайт 🌐", url=site_url)
         )
@@ -181,12 +184,11 @@ async def send_code(callback_query: types.CallbackQuery):
 # Команда /viewcodes для администраторов (для просмотра всех кодов)
 @dp.message_handler(commands=['viewcodes'])
 async def cmd_view_codes(message: types.Message):
-    if message.from_user.id in ADMIN_IDS:  # Проверка, является ли пользователь администратором
-        conn = sqlite3.connect('codes.db')
-        cursor = conn.cursor()
-        cursor.execute("SELECT code, site_url FROM codes")  # Получаем все коды и ссылки
-        codes = cursor.fetchall()
-        conn.close()
+    if message.from_user.id in ADMIN_IDS:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT code, site_url FROM codes")
+            codes = cursor.fetchall()
 
         if codes:
             response = "Список всех кодов:\n\n"
@@ -201,12 +203,11 @@ async def cmd_view_codes(message: types.Message):
 # Команда /clearcodes для администраторов (для удаления всех кодов)
 @dp.message_handler(commands=['clearcodes'])
 async def cmd_clear_codes(message: types.Message):
-    if message.from_user.id in ADMIN_IDS:  # Проверка, является ли пользователь администратором
-        conn = sqlite3.connect('codes.db')
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM codes")  # Удаляем все коды из базы данных
-        conn.commit()
-        conn.close()
+    if message.from_user.id in ADMIN_IDS:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM codes")  # Удаляем все коды из базы данных
+            conn.commit()
 
         await message.answer("✅ Все коды были успешно удалены.")
     else:
@@ -214,4 +215,5 @@ async def cmd_clear_codes(message: types.Message):
 
 # Запуск бота
 if __name__ == "__main__":
+    create_tables()  # Создание таблиц при запуске бота
     executor.start_polling(dp, skip_updates=True)
