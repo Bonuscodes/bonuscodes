@@ -35,35 +35,38 @@ def init_db():
                 cursor.execute('ALTER TABLE codes ADD COLUMN site_url TEXT')
                 debug_print("Столбец site_url был добавлен в таблицу.")
             
-            cursor.execute('''CREATE TABLE IF NOT EXISTS used_ips (
+            cursor.execute('''CREATE TABLE IF NOT EXISTS used_codes (
                                 user_id INTEGER, 
                                 ip_address TEXT,
-                                PRIMARY KEY (user_id, ip_address))''')
+                                code TEXT,
+                                PRIMARY KEY (user_id, ip_address, code))''')
             conn.commit()
     except sqlite3.Error as e:
         debug_print(f"Ошибка при инициализации базы данных: {e}")
 
-# Проверка, использовался ли код для данного пользователя с данным IP
-def is_code_used(user_id, ip_address):
+# Проверка, использовался ли код для данного пользователя и IP
+def is_code_used(user_id, ip_address, code):
     try:
         with sqlite3.connect('codes.db') as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM used_ips WHERE user_id = ? AND ip_address = ?", (user_id, ip_address))
+            cursor.execute("SELECT * FROM used_codes WHERE user_id = ? AND ip_address = ? AND code = ?", 
+                           (user_id, ip_address, code))
             result = cursor.fetchone()
         return result is not None
     except sqlite3.Error as e:
         debug_print(f"Ошибка при проверке использования кода: {e}")
         return False
 
-# Добавление пользователя и его IP-адреса в базу данных
-def add_user(user_id, ip_address):
+# Добавление пользователя, его IP и кода в базу данных
+def add_user(user_id, ip_address, code):
     try:
         with sqlite3.connect('codes.db') as conn:
             cursor = conn.cursor()
-            cursor.execute("INSERT OR IGNORE INTO used_ips (user_id, ip_address) VALUES (?, ?)", (user_id, ip_address))
+            cursor.execute("INSERT OR IGNORE INTO used_codes (user_id, ip_address, code) VALUES (?, ?, ?)", 
+                           (user_id, ip_address, code))
             conn.commit()
     except sqlite3.Error as e:
-        debug_print(f"Ошибка при добавлении пользователя в базу данных: {e}")
+        debug_print(f"Ошибка при добавлении пользователя, IP и кода в базу данных: {e}")
 
 # Функция для добавления кода и сайта в базу данных
 def add_code_to_db(code, site_url):
@@ -151,19 +154,21 @@ async def send_code(callback_query: types.CallbackQuery):
     # Для теста используем фиктивный IP-адрес
     ip_address = "unknown_ip"  # Здесь замените на реальный IP, если используете webhook
 
-    if is_code_used(user_id, ip_address):  # Проверяем, использовался ли код для этого пользователя и IP
-        await bot.send_message(
-            callback_query.from_user.id,
-            "🚨 <b>Вы уже получили код!</b> 🚨\n\n"
-            "Каждый пользователь может получить код только один раз. Спасибо за понимание! 😊",
-            parse_mode=ParseMode.HTML
-        )
-        return
-
     code_data = get_code()
 
     if code_data:
         code, site_url = code_data
+
+        # Проверяем, использовался ли код этим пользователем и IP
+        if is_code_used(user_id, ip_address, code):  
+            await bot.send_message(
+                callback_query.from_user.id,
+                "🚨 <b>Вы уже получили код!</b> 🚨\n\n"
+                "Каждый пользователь может получить код только один раз с одного IP. Спасибо за понимание! 😊",
+                parse_mode=ParseMode.HTML
+            )
+            return
+
         # Красивое сообщение с кодом и кнопкой для перехода на сайт
         keyboard = InlineKeyboardMarkup().add(
             InlineKeyboardButton("Перейти на сайт 🌐", url=site_url)
@@ -176,7 +181,7 @@ async def send_code(callback_query: types.CallbackQuery):
             parse_mode=ParseMode.HTML,
             reply_markup=keyboard
         )
-        add_user(user_id, ip_address)  # Добавляем пользователя и его IP в базу данных
+        add_user(user_id, ip_address, code)  # Добавляем пользователя, его IP и код в базу данных
     else:
         await bot.send_message(
             callback_query.from_user.id,
