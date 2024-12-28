@@ -8,7 +8,7 @@ from aiogram.utils import executor
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 
-API_TOKEN = 'YOUR_BOT_API_TOKEN'
+API_TOKEN = '8007886958:AAEy-Yob9wAOpDWThKX3vVB0ApJB3E6b3Qc'
 ADMIN_IDS = [781745483]  # Замените на реальные ID администраторов
 
 bot = Bot(token=API_TOKEN)
