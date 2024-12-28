@@ -79,6 +79,17 @@ def add_code_to_db(code, site_url):
     except sqlite3.Error as e:
         debug_print(f"Ошибка при добавлении кода в базу данных: {e}")
 
+# Функция для получения всех кодов из базы данных
+def get_all_codes():
+    try:
+        with sqlite3.connect('codes.db') as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT code, site_url FROM codes")
+            return cursor.fetchall()
+    except sqlite3.Error as e:
+        debug_print(f"Ошибка при получении всех кодов: {e}")
+        return []
+
 # Состояния для FSM
 class Form(StatesGroup):
     waiting_for_code = State()
@@ -145,6 +156,21 @@ async def start_command(message: types.Message):
         "🔹 Удачи и не забывай использовать код на нашем сайте! 🔹",
         reply_markup=keyboard
     )
+
+# Обработчик команды /viewcodes для администраторов
+@dp.message_handler(commands=["viewcodes"])
+async def view_codes(message: types.Message):
+    if message.from_user.id in ADMIN_IDS:  # Проверка, является ли пользователь администратором
+        codes = get_all_codes()
+        if codes:
+            response = "📜 Список доступных кодов:\n\n"
+            for code, site_url in codes:
+                response += f"<b>Код:</b> {code} - <b>Сайт:</b> {site_url}\n"
+            await message.answer(response, parse_mode=ParseMode.HTML)
+        else:
+            await message.answer("🚨 Нет доступных кодов.")
+    else:
+        await message.answer("❌ У вас нет прав для использования этой команды.")
 
 # Обработчик команды /getcode через кнопку
 @dp.callback_query_handler(lambda c: c.data == "get_code")
