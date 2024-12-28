@@ -9,6 +9,7 @@ from aiogram.utils import executor
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.dispatcher.filters import Text
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from urllib.parse import urlparse
 
 API_TOKEN = '8007886958:AAEy-Yob9wAOpDWThKX3vVB0ApJB3E6b3Qc'  # Токен вашего бота
 ADMIN_IDS = [781745483]  # Замените на реальные ID администраторов
@@ -63,6 +64,11 @@ async def check_subscription(user_id):
         logger.error(f"Ошибка при проверке подписки пользователя {user_id}: {e}")
         return False
 
+# Проверка на валидность URL
+def is_valid_url(url):
+    parsed_url = urlparse(url)
+    return parsed_url.scheme in ['http', 'https'] and parsed_url.netloc != ''
+
 # Команда /addcode для администраторов
 @dp.message_handler(commands=['addcode'])
 async def cmd_add_code(message: types.Message):
@@ -86,6 +92,11 @@ async def process_url(message: types.Message, state: FSMContext):
     site_url = message.text.strip()  # Получаем ссылку
     user_data = await state.get_data()  # Получаем сохраненные данные
     code = user_data['code']  # Берем код из данных
+
+    # Проверка URL
+    if not is_valid_url(site_url):
+        await message.answer("❌ Неверный формат URL. Пожалуйста, отправьте корректную ссылку.")
+        return
 
     # Добавляем код и сайт в базу данных
     add_code_to_db(code, site_url)
@@ -204,14 +215,23 @@ async def cmd_view_codes(message: types.Message):
 @dp.message_handler(commands=['clearcodes'])
 async def cmd_clear_codes(message: types.Message):
     if message.from_user.id in ADMIN_IDS:
+        await message.answer("⚠️ Вы уверены, что хотите удалить все коды? Это действие необратимо. Напишите 'ДА' для подтверждения.")
+        await Form.waiting_for_code.set()  # Переходим в состояние ожидания подтверждения
+
+# Обработчик подтверждения удаления
+@dp.message_handler(state=Form.waiting_for_code)
+async def confirm_clear_codes(message: types.Message, state: FSMContext):
+    if message.text.strip().upper() == "ДА":
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM codes")  # Удаляем все коды из базы данных
             conn.commit()
 
         await message.answer("✅ Все коды были успешно удалены.")
+        await state.finish()  # Завершаем состояние
     else:
-        await message.answer("❌ У вас нет прав для использования этой команды.")
+        await message.answer("❌ Удаление кодов отменено.")
+        await state.finish()  # Завершаем состояние
 
 # Запуск бота
 if __name__ == "__main__":
