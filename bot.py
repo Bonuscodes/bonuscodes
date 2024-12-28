@@ -2,13 +2,11 @@ import sqlite3
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ParseMode, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.dispatcher.filters import Command
-from aiogram.dispatcher import FSMContext
 from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from aiogram.utils import executor
-from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 
-API_TOKEN = '8007886958:AAEy-Yob9wAOpDWThKX3vVB0ApJB3E6b3Qc'
+API_TOKEN = 'YOUR_BOT_API_TOKEN'
 ADMIN_IDS = [781745483]  # Замените на реальные ID администраторов
 
 bot = Bot(token=API_TOKEN)
@@ -37,6 +35,28 @@ def init_db():
     except sqlite3.Error as e:
         debug_print(f"Ошибка при инициализации базы данных: {e}")
 
+# Добавление нового кода в базу данных
+def add_code_to_db(code, site_url):
+    try:
+        with sqlite3.connect('codes.db') as conn:
+            cursor = conn.cursor()
+            cursor.execute("INSERT INTO codes (code, site_url) VALUES (?, ?)", (code, site_url))
+            conn.commit()
+            debug_print(f"Добавлен новый код: {code}, с URL: {site_url}")
+    except sqlite3.Error as e:
+        debug_print(f"Ошибка при добавлении кода в базу данных: {e}")
+
+# Удаление всех кодов из базы данных
+def clear_codes():
+    try:
+        with sqlite3.connect('codes.db') as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM codes")
+            conn.commit()
+            debug_print("Все коды были удалены из базы данных.")
+    except sqlite3.Error as e:
+        debug_print(f"Ошибка при удалении всех кодов из базы данных: {e}")
+
 # Проверка, использовался ли код для данного пользователя и IP
 def is_code_used(user_id, ip_address, code):
     try:
@@ -45,8 +65,6 @@ def is_code_used(user_id, ip_address, code):
             cursor.execute("SELECT * FROM used_codes WHERE user_id = ? AND ip_address = ? AND code = ?", 
                            (user_id, ip_address, code))
             result = cursor.fetchone()
-            if result:
-                debug_print(f"Код уже использовался: {code} для пользователя {user_id} с IP {ip_address}")
             return result is not None
     except sqlite3.Error as e:
         debug_print(f"Ошибка при проверке использования кода: {e}")
@@ -140,6 +158,55 @@ async def send_code(callback_query: types.CallbackQuery):
             "К сожалению, все коды использованы. Попробуйте позже.",
             parse_mode=ParseMode.HTML
         )
+
+# Команда для админов для добавления нового кода
+@dp.message_handler(commands=["addcode"])
+async def add_code(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        await message.reply("🚫 У вас нет прав для выполнения этой команды.")
+        return
+
+    # Запрашиваем код и URL у администратора
+    await message.reply("🔹 Введите новый код (например: ABC123):")
+    await dp.register_message_handler(process_code, state="code", user_id=message.from_user.id)
+
+async def process_code(message: types.Message):
+    code = message.text.strip()
+
+    # Проверка на дублирование кода
+    with sqlite3.connect('codes.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT code FROM codes WHERE code = ?", (code,))
+        if cursor.fetchone():
+            await message.reply("🚨 Этот код уже существует в базе данных.")
+            return
+
+    # Попросим URL для нового кода
+    await message.reply("🔹 Теперь введите URL для использования этого кода:")
+    await dp.register_message_handler(process_url, state="url", user_id=message.from_user.id, code=code)
+
+async def process_url(message: types.Message, state: FSMContext):
+    url = message.text.strip()
+
+    code = (await state.get_data())["code"]
+
+    # Добавление кода в базу данных
+    add_code_to_db(code, url)
+    await message.reply(f"✅ Код {code} успешно добавлен с URL {url}!")
+
+    # Закрытие состояния
+    await state.finish()
+
+# Команда для администраторов для очистки всех кодов
+@dp.message_handler(commands=["clearcodes"])
+async def clear_codes_command(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        await message.reply("🚫 У вас нет прав для выполнения этой команды.")
+        return
+
+    # Очищаем все коды
+    clear_codes()
+    await message.reply("✅ Все коды были успешно удалены из базы данных.")
 
 # Запуск бота
 if __name__ == "__main__":
