@@ -9,6 +9,8 @@ from aiogram.utils import executor
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.dispatcher.filters import Text
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiohttp import web  # Для работы с вебхуками
+import os
 from urllib.parse import urlparse
 
 API_TOKEN = '8007886958:AAEy-Yob9wAOpDWThKX3vVB0ApJB3E6b3Qc'  # Токен вашего бота
@@ -214,7 +216,27 @@ async def send_code(callback_query: types.CallbackQuery):
             parse_mode=ParseMode.HTML
         )
 
-# Запуск бота
+# Настройка вебхуков для Render
+WEBHOOK_PATH = '/webhook'  # Путь для вебхука
+WEBHOOK_URL = f'https://telegram-bot-54c4.onrender.com'  # Укажите URL для вашего приложения на Render
+
+async def on_start():
+    app = web.Application()
+    app.router.add_post(WEBHOOK_PATH, webhook)
+    return app
+
+# Функция для обработки вебхука
+async def webhook(request):
+    json_str = await request.json()
+    update = types.Update(**json_str)
+    await dp.process_update(update)
+    return web.Response()
+
+# Запуск вебхуков
 if __name__ == "__main__":
     create_tables()  # Создание таблиц при запуске бота
-    executor.start_polling(dp, skip_updates=True)  # Запуск polling с пропуском старых обновлений
+
+    # Настройка вебхуков
+    app = web.Application()
+    app.router.add_post(WEBHOOK_PATH, webhook)  # Обрабатываем вебхук
+    web.run_app(app, host="0.0.0.0", port=10000)  # Запускаем сервер на порту 10000
