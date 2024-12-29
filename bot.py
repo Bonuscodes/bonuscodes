@@ -244,10 +244,11 @@ async def webhook(request):
 
 # Запуск вебхуков
 if __name__ == "__main__":
-    await create_tables()  # Создание таблиц при запуске бота
+    # Вызываем асинхронную функцию
+    from asyncio import run
+    run(create_tables())  # Создание таблиц при запуске бота
 
     # Настройка вебхуков
     app = web.Application()
     app.router.add_post(WEBHOOK_PATH, webhook)  # Обрабатываем вебхук
     web.run_app(app, host="0.0.0.0", port=10000)  # Запускаем сервер на порту 10000
-
