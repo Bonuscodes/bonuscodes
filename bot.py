@@ -1,5 +1,6 @@
 import asyncpg
 import logging
+import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ParseMode, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.dispatcher.filters import Command
@@ -10,11 +11,15 @@ from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiohttp import web  # Для работы с вебхуками
 from urllib.parse import urlparse
-import os
 
-API_TOKEN = '8007886958:AAEy-Yob9wAOpDWThKX3vVB0ApJB3E6b3Qc'  # Токен вашего бота
-ADMIN_IDS = [781745483]  # Замените на реальные ID администраторов
-CHANNEL_ID = "@scattercasinostream"  # Название вашего канала
+# Получение значений из переменных окружения
+API_TOKEN = os.getenv('API_TOKEN')  # Токен вашего бота
+ADMIN_IDS = list(map(int, os.getenv('ADMIN_IDS', '').split(',')))  # Список ID администраторов
+CHANNEL_ID = os.getenv('CHANNEL_ID')  # Название вашего канала
+DB_USER = os.getenv('DB_USER')  # Имя пользователя для подключения к базе данных
+DB_PASSWORD = os.getenv('DB_PASSWORD')  # Пароль для подключения к базе данных
+DB_NAME = os.getenv('DB_NAME')  # Название базы данных
+DB_HOST = os.getenv('DB_HOST', 'localhost')  # Хост базы данных (localhost по умолчанию)
 
 bot = Bot(token=API_TOKEN)
 storage = MemoryStorage()  # Создаем объект MemoryStorage
@@ -28,10 +33,10 @@ logger = logging.getLogger(__name__)
 # Подключение к базе данных PostgreSQL
 async def get_db_connection():
     return await asyncpg.connect(
-        user='your_user',  # Укажите ваше имя пользователя
-        password='your_password',  # Укажите ваш пароль
-        database='your_database',  # Укажите вашу базу данных
-        host='localhost',  # Укажите хост, если не локальный
+        user=DB_USER, 
+        password=DB_PASSWORD, 
+        database=DB_NAME, 
+        host=DB_HOST,
     )
 
 # Создание таблиц в базе данных, если их нет
@@ -171,62 +176,9 @@ async def start_command(message: types.Message):
         reply_markup=keyboard
     )
 
-# Обработчик команды /getcode через кнопку
-@dp.callback_query_handler(lambda c: c.data == "get_code")
-async def send_code(callback_query: types.CallbackQuery):
-    user_id = callback_query.from_user.id
-
-    # Проверяем, подписан ли пользователь на канал
-    if not await check_subscription(user_id):
-        await bot.send_message(
-            callback_query.from_user.id,
-            "🚨 Чтобы получить код, нужно подписаться на наш канал: https://t.me/scattercasinostream 🚨\n\n"
-            "Пожалуйста, подпишитесь на канал, а затем нажмите кнопку 'Получить код' еще раз.",
-        )
-        return
-
-    # Проверяем, использовался ли код
-    if await is_code_used(user_id):
-        await bot.send_message(
-            callback_query.from_user.id,
-            "🚨 <b>Вы уже получили код!</b> 🚨\n\n"
-            "Каждый пользователь может получить код только один раз. Спасибо за понимание! 😊",
-            parse_mode=ParseMode.HTML
-        )
-        return
-
-    # Получаем код из базы данных
-    code_data = await get_code()
-
-    if code_data:
-        code, site_url = code_data
-        keyboard = InlineKeyboardMarkup().add(
-            InlineKeyboardButton("Перейти на сайт 🌐", url=site_url)
-        )
-        await bot.send_message(
-            callback_query.from_user.id,
-            f"<b>Ваш уникальный код:</b> <code>{code}</code>\n\n"
-            f"🎉 Наслаждайтесь! Приятных покупок! 💸\n"
-            f"Переходите на наш сайт: {site_url}",
-            parse_mode=ParseMode.HTML,
-            reply_markup=keyboard
-        )
-
-        # Получаем IP-адрес
-        ip_address = callback_query.from_user.id  # Здесь будет место для получения IP через webhook
-        await add_user(user_id)  # Добавляем пользователя как использовавшего код
-        await add_ip(ip_address, user_id)  # Добавляем IP-адрес в базу данных
-    else:
-        await bot.send_message(
-            callback_query.from_user.id,
-            "🚨 <b>Коды закончились!</b> 🚨\n\n"
-            "К сожалению, все коды использованы. Попробуйте позже.",
-            parse_mode=ParseMode.HTML
-        )
-
 # Настройка вебхуков для Render
 WEBHOOK_PATH = '/webhook'  # Путь для вебхука
-WEBHOOK_URL = f'https://telegram-bot-54c4.onrender.com'  # Укажите URL для вашего приложения на Render
+WEBHOOK_URL = os.getenv('WEBHOOK_URL')  # Укажите URL для вашего приложения на Render
 
 async def on_start():
     # Устанавливаем вебхук для бота
