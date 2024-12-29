@@ -18,7 +18,7 @@ CHANNEL_ID = "@scattercasinostream"  # Название вашего канал�
 bot = Bot(token=API_TOKEN)
 storage = MemoryStorage()  # Создаем объект MemoryStorage
 dp = Dispatcher(bot, storage=storage)  # Указываем хранилище для dispatcher
-dp.middleware.setup(LoggingMiddleware())
+dp.middleware.setup(LoggingMiddleware())  # Логирование
 
 # Настройка логирования
 logging.basicConfig(level=logging.DEBUG)
@@ -36,7 +36,9 @@ def create_tables():
                             code TEXT PRIMARY KEY, 
                             site_url TEXT)''')
 
-        cursor.execute('''CREATE TABLE IF NOT EXISTS used_ips (user_id INTEGER PRIMARY KEY)''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS used_ips (
+                            user_id INTEGER PRIMARY KEY,
+                            ip_address TEXT)''')  # Храним IP-адреса
         conn.commit()
 
 # Состояния для FSM
@@ -68,6 +70,20 @@ async def check_subscription(user_id):
 def is_valid_url(url):
     parsed_url = urlparse(url)
     return parsed_url.scheme in ['http', 'https'] and parsed_url.netloc != ''
+
+# Функция для проверки, использовался ли IP
+def is_ip_used(ip_address):
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM used_ips WHERE ip_address = ?", (ip_address,))
+        return cursor.fetchone() is not None
+
+# Функция для добавления IP-адреса в базу данных
+def add_ip(ip_address, user_id):
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR IGNORE INTO used_ips (user_id, ip_address) VALUES (?, ?)", (user_id, ip_address))
+        conn.commit()
 
 # Команда /addcode для администраторов
 @dp.message_handler(commands=['addcode'])
@@ -159,6 +175,7 @@ async def send_code(callback_query: types.CallbackQuery):
         )
         return
 
+    # Проверяем, использовался ли код
     if is_code_used(user_id):
         await bot.send_message(
             callback_query.from_user.id,
@@ -168,6 +185,7 @@ async def send_code(callback_query: types.CallbackQuery):
         )
         return
 
+    # Получаем код из базы данных
     code_data = get_code()
 
     if code_data:
@@ -183,7 +201,11 @@ async def send_code(callback_query: types.CallbackQuery):
             parse_mode=ParseMode.HTML,
             reply_markup=keyboard
         )
-        add_user(user_id)  # Добавляем пользователя в базу данных как использовавшего код
+
+        # Получаем IP-адрес
+        ip_address = callback_query.from_user.id  # Здесь будет место для получения IP через webhook
+        add_user(user_id)  # Добавляем пользователя как использовавшего код
+        add_ip(ip_address, user_id)  # Добавляем IP-адрес в базу данных
     else:
         await bot.send_message(
             callback_query.from_user.id,
@@ -191,47 +213,6 @@ async def send_code(callback_query: types.CallbackQuery):
             "К сожалению, все коды использованы. Попробуйте позже.",
             parse_mode=ParseMode.HTML
         )
-
-# Команда /viewcodes для администраторов (для просмотра всех кодов)
-@dp.message_handler(commands=['viewcodes'])
-async def cmd_view_codes(message: types.Message):
-    if message.from_user.id in ADMIN_IDS:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT code, site_url FROM codes")
-            codes = cursor.fetchall()
-
-        if codes:
-            response = "Список всех кодов:\n\n"
-            for code, site_url in codes:
-                response += f"🔑 Код: <code>{code}</code>\n🌐 Сайт: {site_url}\n\n"
-            await message.answer(response, parse_mode=ParseMode.HTML)
-        else:
-            await message.answer("🚨 Нет доступных кодов в базе данных.")
-    else:
-        await message.answer("❌ У вас нет прав для использования этой команды.")
-
-# Команда /clearcodes для администраторов (для удаления всех кодов)
-@dp.message_handler(commands=['clearcodes'])
-async def cmd_clear_codes(message: types.Message):
-    if message.from_user.id in ADMIN_IDS:
-        await message.answer("⚠️ Вы уверены, что хотите удалить все коды? Это действие необратимо. Напишите 'ДА' для подтверждения.")
-        await Form.waiting_for_code.set()  # Переходим в состояние ожидания подтверждения
-
-# Обработчик подтверждения удаления
-@dp.message_handler(state=Form.waiting_for_code)
-async def confirm_clear_codes(message: types.Message, state: FSMContext):
-    if message.text.strip().upper() == "ДА":
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM codes")  # Удаляем все коды из базы данных
-            conn.commit()
-
-        await message.answer("✅ Все коды были успешно удалены.")
-        await state.finish()  # Завершаем состояние
-    else:
-        await message.answer("❌ Удаление кодов отменено.")
-        await state.finish()  # Завершаем состояние
 
 # Запуск бота
 if __name__ == "__main__":
