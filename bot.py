@@ -14,12 +14,30 @@ from urllib.parse import urlparse
 
 # Получение значений из переменных окружения
 API_TOKEN = os.getenv('API_TOKEN')  # Токен вашего бота
-ADMIN_IDS = list(map(int, os.getenv('ADMIN_IDS', '').split(',')))  # Список ID администраторов
+admin_ids_str = os.getenv('ADMIN_IDS', '')
+ADMIN_IDS = [int(id.strip()) for id in admin_ids_str.split(',') if id.strip()]  # Список ID администраторов
 CHANNEL_ID = os.getenv('CHANNEL_ID')  # Название вашего канала
 DB_USER = os.getenv('DB_USER')  # Имя пользователя для подключения к базе данных
 DB_PASSWORD = os.getenv('DB_PASSWORD')  # Пароль для подключения к базе данных
 DB_NAME = os.getenv('DB_NAME')  # Название базы данных
 DB_HOST = os.getenv('DB_HOST', 'localhost')  # Хост базы данных (localhost по умолчанию)
+WEBHOOK_URL = os.getenv('WEBHOOK_URL')  # Укажите URL для вашего приложения на Render
+
+# Проверка обязательных переменных окружения
+if not API_TOKEN:
+    raise ValueError("Не задан API_TOKEN")
+if not ADMIN_IDS:
+    raise ValueError("Не заданы ADMIN_IDS")
+if not CHANNEL_ID:
+    raise ValueError("Не задан CHANNEL_ID")
+if not DB_USER:
+    raise ValueError("Не задан DB_USER")
+if not DB_PASSWORD:
+    raise ValueError("Не задан DB_PASSWORD")
+if not DB_NAME:
+    raise ValueError("Не задан DB_NAME")
+if not WEBHOOK_URL:
+    raise ValueError("Не задан WEBHOOK_URL")
 
 bot = Bot(token=API_TOKEN)
 storage = MemoryStorage()  # Создаем объект MemoryStorage
@@ -178,7 +196,6 @@ async def start_command(message: types.Message):
 
 # Настройка вебхуков для Render
 WEBHOOK_PATH = '/webhook'  # Путь для вебхука
-WEBHOOK_URL = os.getenv('WEBHOOK_URL')  # Укажите URL для вашего приложения на Render
 
 async def on_start():
     # Устанавливаем вебхук для бота
