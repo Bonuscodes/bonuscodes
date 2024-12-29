@@ -221,6 +221,8 @@ WEBHOOK_PATH = '/webhook'  # Путь для вебхука
 WEBHOOK_URL = f'https://telegram-bot-54c4.onrender.com'  # Укажите URL для вашего приложения на Render
 
 async def on_start():
+    # Устанавливаем вебхук для бота
+    await bot.set_webhook(WEBHOOK_URL + WEBHOOK_PATH)
     app = web.Application()
     app.router.add_post(WEBHOOK_PATH, webhook)
     return app
