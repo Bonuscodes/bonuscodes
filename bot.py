@@ -1,4 +1,4 @@
-import sqlite3
+import asyncpg
 import logging
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ParseMode, InlineKeyboardMarkup, InlineKeyboardButton
@@ -7,11 +7,10 @@ from aiogram.dispatcher import FSMContext
 from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from aiogram.utils import executor
 from aiogram.dispatcher.filters.state import State, StatesGroup
-from aiogram.dispatcher.filters import Text
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiohttp import web  # Для работы с вебхуками
-import os
 from urllib.parse import urlparse
+import os
 
 API_TOKEN = '8007886958:AAEy-Yob9wAOpDWThKX3vVB0ApJB3E6b3Qc'  # Токен вашего бота
 ADMIN_IDS = [781745483]  # Замените на реальные ID администраторов
@@ -26,22 +25,31 @@ dp.middleware.setup(LoggingMiddleware())  # Логирование
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-# Функция для подключения к базе данных
-def get_db_connection():
-    return sqlite3.connect('codes.db', check_same_thread=False)  # Добавление параметра check_same_thread=False для многозадачности
+# Подключение к базе данных PostgreSQL
+async def get_db_connection():
+    return await asyncpg.connect(
+        user='your_user',  # Укажите ваше имя пользователя
+        password='your_password',  # Укажите ваш пароль
+        database='your_database',  # Укажите вашу базу данных
+        host='localhost',  # Укажите хост, если не локальный
+    )
 
 # Создание таблиц в базе данных, если их нет
-def create_tables():
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute('''CREATE TABLE IF NOT EXISTS codes (
-                            code TEXT PRIMARY KEY, 
-                            site_url TEXT)''')
-
-        cursor.execute('''CREATE TABLE IF NOT EXISTS used_ips (
-                            user_id INTEGER PRIMARY KEY,
-                            ip_address TEXT)''')  # Храним IP-адреса
-        conn.commit()
+async def create_tables():
+    conn = await get_db_connection()
+    await conn.execute('''
+        CREATE TABLE IF NOT EXISTS codes (
+            code TEXT PRIMARY KEY, 
+            site_url TEXT
+        )
+    ''')
+    await conn.execute('''
+        CREATE TABLE IF NOT EXISTS used_ips (
+            user_id INTEGER PRIMARY KEY,
+            ip_address TEXT
+        )
+    ''')
+    await conn.close()
 
 # Состояния для FSM
 class Form(StatesGroup):
@@ -49,12 +57,14 @@ class Form(StatesGroup):
     waiting_for_site = State()
 
 # Функция для добавления кода и сайта в базу данных
-def add_code_to_db(code, site_url):
+async def add_code_to_db(code, site_url):
     logger.debug(f"Добавление кода: {code}, сайта: {site_url}")
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("INSERT OR IGNORE INTO codes (code, site_url) VALUES (?, ?)", (code, site_url))
-        conn.commit()
+    conn = await get_db_connection()
+    await conn.execute(
+        "INSERT INTO codes (code, site_url) VALUES ($1, $2) ON CONFLICT (code) DO NOTHING", 
+        code, site_url
+    )
+    await conn.close()
 
 # Проверка подписки пользователя на канал
 async def check_subscription(user_id):
@@ -74,18 +84,20 @@ def is_valid_url(url):
     return parsed_url.scheme in ['http', 'https'] and parsed_url.netloc != ''
 
 # Функция для проверки, использовался ли IP
-def is_ip_used(ip_address):
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM used_ips WHERE ip_address = ?", (ip_address,))
-        return cursor.fetchone() is not None
+async def is_ip_used(ip_address):
+    conn = await get_db_connection()
+    result = await conn.fetchrow("SELECT * FROM used_ips WHERE ip_address = $1", ip_address)
+    await conn.close()
+    return result is not None
 
 # Функция для добавления IP-адреса в базу данных
-def add_ip(ip_address, user_id):
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("INSERT OR IGNORE INTO used_ips (user_id, ip_address) VALUES (?, ?)", (user_id, ip_address))
-        conn.commit()
+async def add_ip(ip_address, user_id):
+    conn = await get_db_connection()
+    await conn.execute(
+        "INSERT INTO used_ips (user_id, ip_address) VALUES ($1, $2) ON CONFLICT (user_id) DO NOTHING",
+        user_id, ip_address
+    )
+    await conn.close()
 
 # Команда /addcode для администраторов
 @dp.message_handler(commands=['addcode'])
@@ -117,7 +129,7 @@ async def process_url(message: types.Message, state: FSMContext):
         return
 
     # Добавляем код и сайт в базу данных
-    add_code_to_db(code, site_url)
+    await add_code_to_db(code, site_url)
 
     await message.answer(f"✅ Код '{code}' с сайтом '{site_url}' успешно добавлен в базу данных.")
 
@@ -125,30 +137,26 @@ async def process_url(message: types.Message, state: FSMContext):
     await state.finish()
 
 # Функция для раздачи кодов с уникальными сайтами
-def get_code():
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT code, site_url FROM codes LIMIT 1")
-        code = cursor.fetchone()
-        if code:
-            cursor.execute("DELETE FROM codes WHERE code = ?", (code[0],))
-            conn.commit()
-            return code
-    return None
+async def get_code():
+    conn = await get_db_connection()
+    code_data = await conn.fetchrow("SELECT code, site_url FROM codes LIMIT 1")
+    if code_data:
+        await conn.execute("DELETE FROM codes WHERE code = $1", code_data['code'])
+    await conn.close()
+    return code_data
 
 # Проверка, использовался ли код для данного пользователя
-def is_code_used(user_id):
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM used_ips WHERE user_id = ?", (user_id,))
-        return cursor.fetchone() is not None
+async def is_code_used(user_id):
+    conn = await get_db_connection()
+    result = await conn.fetchrow("SELECT * FROM used_ips WHERE user_id = $1", user_id)
+    await conn.close()
+    return result is not None
 
 # Добавление пользователя в базу данных
-def add_user(user_id):
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("INSERT OR IGNORE INTO used_ips (user_id) VALUES (?)", (user_id,))
-        conn.commit()
+async def add_user(user_id):
+    conn = await get_db_connection()
+    await conn.execute("INSERT INTO used_ips (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING", user_id)
+    await conn.close()
 
 # Обработчик команды /start
 @dp.message_handler(commands=["start"])
@@ -178,7 +186,7 @@ async def send_code(callback_query: types.CallbackQuery):
         return
 
     # Проверяем, использовался ли код
-    if is_code_used(user_id):
+    if await is_code_used(user_id):
         await bot.send_message(
             callback_query.from_user.id,
             "🚨 <b>Вы уже получили код!</b> 🚨\n\n"
@@ -188,7 +196,7 @@ async def send_code(callback_query: types.CallbackQuery):
         return
 
     # Получаем код из базы данных
-    code_data = get_code()
+    code_data = await get_code()
 
     if code_data:
         code, site_url = code_data
@@ -206,8 +214,8 @@ async def send_code(callback_query: types.CallbackQuery):
 
         # Получаем IP-адрес
         ip_address = callback_query.from_user.id  # Здесь будет место для получения IP через webhook
-        add_user(user_id)  # Добавляем пользователя как использовавшего код
-        add_ip(ip_address, user_id)  # Добавляем IP-адрес в базу данных
+        await add_user(user_id)  # Добавляем пользователя как использовавшего код
+        await add_ip(ip_address, user_id)  # Добавляем IP-адрес в базу данных
     else:
         await bot.send_message(
             callback_query.from_user.id,
@@ -236,9 +244,10 @@ async def webhook(request):
 
 # Запуск вебхуков
 if __name__ == "__main__":
-    create_tables()  # Создание таблиц при запуске бота
+    await create_tables()  # Создание таблиц при запуске бота
 
     # Настройка вебхуков
     app = web.Application()
     app.router.add_post(WEBHOOK_PATH, webhook)  # Обрабатываем вебхук
     web.run_app(app, host="0.0.0.0", port=10000)  # Запускаем сервер на порту 10000
+
