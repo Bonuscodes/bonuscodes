@@ -8,6 +8,7 @@ from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiohttp import web
 from urllib.parse import urlparse
+import asyncio
 
 API_TOKEN = os.getenv('API_TOKEN')
 admin_ids_str = os.getenv('ADMIN_IDS', '')
@@ -35,6 +36,7 @@ if not WEBHOOK_URL:
     raise ValueError("Не задан WEBHOOK_URL (например, https://ваш-домен.onrender.com)")
 
 bot = Bot(token=API_TOKEN)
+Bot.set_current(bot)  # Установить текущий бот
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 dp.middleware.setup(LoggingMiddleware())
@@ -95,13 +97,12 @@ async def webhook(request):
         await dp.process_update(update)
         return web.Response()
     except Exception as e:
-        logger.error(f"Ошибка в вебхуке: {e}")
+        logger.exception("Ошибка в вебхуке")  # Подробное логирование
         return web.Response(status=500)
 
 if __name__ == "__main__":
-    from asyncio import run
-    run(create_tables())
-    run(bot.set_webhook(WEBHOOK_URL + WEBHOOK_PATH))
+    asyncio.run(create_tables())
+    asyncio.run(bot.set_webhook(WEBHOOK_URL + WEBHOOK_PATH))
 
     app = web.Application()
     app.router.add_post(WEBHOOK_PATH, webhook)
