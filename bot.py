@@ -217,12 +217,12 @@ async def send_code(callback_query: types.CallbackQuery):
         ip_used = await check_ip(ip_address)
         if ip_used:
             await callback_query.message.reply(
-                "Вы не можете получить код повторно с этого IP-адреса!"
+                "Вы не можете получить код повторно!"
             )
             return
     except Exception as e:
         logger.error(f"Ошибка при проверке IP для пользователя {user_id}: {e}")
-        await callback_query.message.reply("Произошла ошибка при проверке вашего IP-адреса. Попробуйте позже.")
+        await callback_query.message.reply("Произошла ошибка попробуйте позже.")
         return
 
     # Проверка, получил ли пользователь уже код
