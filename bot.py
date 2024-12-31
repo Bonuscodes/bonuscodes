@@ -74,6 +74,14 @@ async def create_tables():
     ''')
     await conn.close()
 
+async def get_unique_code():
+    conn = await get_db_connection()
+    code = await conn.fetchval("SELECT code FROM codes LIMIT 1")  # Получаем первый доступный код
+    if code:
+        await conn.execute("DELETE FROM codes WHERE code = $1", code)  # Удаляем код из базы после выдачи
+    await conn.close()
+    return code
+
 class Form(StatesGroup):
     waiting_for_code = State()
     waiting_for_site = State()
@@ -87,6 +95,21 @@ async def start_command(message: types.Message):
         "📝 Просто нажми на кнопку, чтобы получить свой код! 🎉",
         reply_markup=keyboard
     )
+
+@dp.callback_query_handler(text="get_code")
+async def send_code(callback_query: types.CallbackQuery):
+    user_id = callback_query.from_user.id
+    code = await get_unique_code()
+
+    if code:
+        await callback_query.message.reply(
+            f"Ваш уникальный код: {code} 🎟️\n\n"
+            "Этот код больше не доступен для получения повторно."
+        )
+    else:
+        await callback_query.message.reply(
+            "Извините, все коды были выданы. Пожалуйста, попробуйте позже."
+        )
 
 WEBHOOK_PATH = '/webhook'
 
