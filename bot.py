@@ -94,6 +94,9 @@ class Form(StatesGroup):
 # Проверка подписки на канал
 async def check_subscription(user_id: int):
     try:
+        # Задержка перед проверкой подписки (2 секунды)
+        await asyncio.sleep(2)
+        
         member = await bot.get_chat_member(CHANNEL_ID, user_id)
         # Логируем статус пользователя
         logger.debug(f"User {user_id} status in channel: {member.status}")
@@ -178,7 +181,7 @@ async def start_command(message: types.Message):
 @dp.callback_query_handler(text="get_code")
 async def send_code(callback_query: types.CallbackQuery):
     user_id = callback_query.from_user.id
-    ip_address = callback_query.message.chat.id  # Получаем IP-адрес (замените на соответствующий способ)
+    ip_address = callback_query.message.chat.id  # Примечание: реальный способ получения IP-адреса зависит от конфигурации
     
     # Проверка подписки на канал
     is_subscribed = await check_subscription(user_id)
