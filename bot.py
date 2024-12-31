@@ -78,6 +78,7 @@ async def create_tables():
     ''')
     await conn.close()
 
+# Функция для получения уникального кода
 async def get_unique_code():
     conn = await get_db_connection()
     result = await conn.fetchrow("SELECT code, site_url FROM codes LIMIT 1")  # Получаем первый доступный код и сайт
@@ -85,11 +86,6 @@ async def get_unique_code():
         await conn.execute("DELETE FROM codes WHERE code = $1", result['code'])  # Удаляем код из базы после выдачи
     await conn.close()
     return result
-
-# Состояния для машины состояний
-class Form(StatesGroup):
-    waiting_for_code = State()
-    waiting_for_site = State()
 
 # Проверка подписки на канал
 async def check_subscription(user_id: int):
@@ -111,7 +107,7 @@ async def check_subscription(user_id: int):
         logger.error(f"Error checking subscription for user {user_id}: {str(e)}")
         return False
 
-# Проверка IP-адреса
+# Проверка, был ли использован IP-адрес
 async def check_ip(user_id: int, ip_address: str):
     conn = await get_db_connection()
     ip_address = str(ip_address)  # Преобразуем IP-адрес в строку
