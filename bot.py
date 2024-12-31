@@ -134,11 +134,11 @@ if __name__ == "__main__":
     # Создаем таблицы при старте
     asyncio.run(create_tables())
 
-    # Удаляем старый вебхук перед установкой нового
-    asyncio.run(bot.delete_webhook())  # Удаляем старый вебхук
+    # Удаляем старый вебхук (если был)
+    asyncio.run(bot.delete_webhook())
 
     # Устанавливаем новый вебхук
-    asyncio.run(bot.set_webhook(WEBHOOK_URL + WEBHOOK_PATH))  # Устанавливаем новый
+    asyncio.run(bot.set_webhook(WEBHOOK_URL + "/webhook"))
 
     # Запуск приложения с обработкой вебхуков
     app = web.Application()
