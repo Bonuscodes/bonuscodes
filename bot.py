@@ -95,10 +95,17 @@ class Form(StatesGroup):
 async def check_subscription(user_id: int):
     try:
         member = await bot.get_chat_member(CHANNEL_ID, user_id)
+        # Логируем статус пользователя
+        logger.debug(f"User {user_id} status in channel: {member.status}")
+        
         if member.status in ['member', 'administrator', 'creator']:
             return True
         return False
     except ChatNotFound:
+        logger.error(f"Channel not found or user {user_id} is not a member of the channel")
+        return False
+    except Exception as e:
+        logger.error(f"Error checking subscription for user {user_id}: {str(e)}")
         return False
 
 # Проверка IP-адреса
