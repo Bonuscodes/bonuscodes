@@ -199,42 +199,56 @@ async def send_code(callback_query: types.CallbackQuery):
     logger.debug(f"User {user_id} clicked on 'get_code'. IP: {ip_address}")
     
     # Проверка подписки на канал
-    is_subscribed = await check_subscription(user_id)
-    if not is_subscribed:
-        await callback_query.message.reply(
-            f"Для получения кода необходимо подписаться на канал! 🎉\n\n"
-            f"Подпишитесь на канал: {CHANNEL_LINK}"
-        )
+    try:
+        is_subscribed = await check_subscription(user_id)
+        if not is_subscribed:
+            await callback_query.message.reply(
+                f"Для получения кода необходимо подписаться на канал! 🎉\n\n"
+                f"Подпишитесь на канал: {CHANNEL_LINK}"
+            )
+            return
+    except Exception as e:
+        logger.error(f"Ошибка при проверке подписки для пользователя {user_id}: {e}")
+        await callback_query.message.reply("Произошла ошибка при проверке вашей подписки. Попробуйте позже.")
         return
 
     # Проверка, получил ли пользователь уже код
-    already_received = await check_code_given(user_id)
-    if already_received:
-        await callback_query.message.reply(
-            "Вы уже получили свой код!"
-        )
+    try:
+        already_received = await check_code_given(user_id)
+        if already_received:
+            await callback_query.message.reply(
+                "Вы уже получили свой код!"
+            )
+            return
+    except Exception as e:
+        logger.error(f"Ошибка при проверке кода для пользователя {user_id}: {e}")
+        await callback_query.message.reply("Произошла ошибка при проверке, был ли вам выдан код. Попробуйте позже.")
         return
 
     # Выдача уникального кода и сайта
-    result = await get_unique_code()
-    if result:
-        code = result['code']
-        site_url = result['site_url']
-        
-        await callback_query.message.reply(
-            f"Ваш уникальный код: {code} 🎟️\n\n"
-            f"Сайт для использования кода: {site_url}\n\n"
-            "Этот код больше не доступен для получения повторно."
-        )
-        
-        # Сохраняем данные в базе о том, что пользователь получил код и его IP
-        conn = await get_db_connection()
-        await conn.execute("INSERT INTO used_codes (user_id, code, ip_address) VALUES ($1, $2, $3)", user_id, code, ip_address)
-        await conn.close()
-    else:
-        await callback_query.message.reply(
-            "Извините, все коды были выданы. Пожалуйста, попробуйте позже."
-        )
+    try:
+        result = await get_unique_code()
+        if result:
+            code = result['code']
+            site_url = result['site_url']
+            
+            await callback_query.message.reply(
+                f"Ваш уникальный код: {code} 🎟️\n\n"
+                f"Сайт для использования кода: {site_url}\n\n"
+                "Этот код больше не доступен для получения повторно."
+            )
+            
+            # Сохраняем данные в базе о том, что пользователь получил код и его IP
+            conn = await get_db_connection()
+            await conn.execute("INSERT INTO used_codes (user_id, code, ip_address) VALUES ($1, $2, $3)", user_id, code, ip_address)
+            await conn.close()
+        else:
+            await callback_query.message.reply(
+                "Извините, все коды были выданы. Пожалуйста, попробуйте позже."
+            )
+    except Exception as e:
+        logger.error(f"Ошибка при выдаче кода для пользователя {user_id}: {e}")
+        await callback_query.message.reply("Произошла ошибка при выдаче кода. Попробуйте позже.")
 
 # Универсальный обработчик для всех сообщений
 @dp.message_handler()
