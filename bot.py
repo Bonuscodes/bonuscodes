@@ -131,9 +131,13 @@ async def webhook(request):
         return web.Response(status=500)
 
 if __name__ == "__main__":
-    asyncio.run(create_tables())  # Создаем таблицы при старте
+    # Создаем таблицы при старте
+    asyncio.run(create_tables())
+    
+    # Устанавливаем вебхук
     asyncio.run(bot.set_webhook(WEBHOOK_URL + WEBHOOK_PATH))  # Устанавливаем вебхук
-
+    
+    # Запуск приложения с обработкой вебхуков
     app = web.Application()
     app.router.add_post(WEBHOOK_PATH, webhook)
     web.run_app(app, host="0.0.0.0", port=10000)
