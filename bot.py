@@ -58,22 +58,22 @@ async def get_db_connection():
 
 async def create_tables():
     conn = await get_db_connection()
-    await conn.execute('''
+    await conn.execute(''' 
         CREATE TABLE IF NOT EXISTS codes (
             code TEXT PRIMARY KEY, 
             site_url TEXT
         )
     ''')
-    await conn.execute('''
+    await conn.execute(''' 
         CREATE TABLE IF NOT EXISTS used_ips (
             user_id INTEGER PRIMARY KEY,
             ip_address TEXT
         )
     ''')
-    await conn.execute('''
+    await conn.execute(''' 
         CREATE INDEX IF NOT EXISTS idx_used_ips_user_id ON used_ips (user_id);
     ''')
-    await conn.execute('''
+    await conn.execute(''' 
         CREATE INDEX IF NOT EXISTS idx_codes_code ON codes (code);
     ''')
     await conn.close()
