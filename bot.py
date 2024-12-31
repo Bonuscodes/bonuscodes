@@ -6,7 +6,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
-from aiohttp import web
+from fastapi import FastAPI, Request
 import asyncio
 from aiogram.utils.exceptions import ChatNotFound
 
@@ -229,15 +229,18 @@ async def send_code(callback_query: types.CallbackQuery):
 # Вебхук для приема обновлений
 WEBHOOK_PATH = '/webhook'
 
-async def webhook(request):
+app = FastAPI()
+
+@app.post(WEBHOOK_PATH)
+async def webhook(request: Request):
     try:
         json_str = await request.json()
         update = types.Update(**json_str)
         await dp.process_update(update)
-        return web.Response()
+        return {"status": "success"}
     except Exception as e:
         logger.exception("Ошибка в вебхуке")  # Подробное логирование
-        return web.Response(status=500)
+        return {"status": "error", "message": str(e)}
 
 if __name__ == "__main__":
     # Создаем таблицы при старте
@@ -246,7 +249,6 @@ if __name__ == "__main__":
     # Устанавливаем вебхук
     asyncio.run(bot.set_webhook(WEBHOOK_URL + "/webhook"))
     
-    # Запуск приложения с обработкой вебхуков
-    app = web.Application()
-    app.router.add_post(WEBHOOK_PATH, webhook)
-    web.run_app(app, host="0.0.0.0", port=10000)
+    # Запуск FastAPI приложения
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=10000)
