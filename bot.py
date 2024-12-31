@@ -218,7 +218,7 @@ async def send_code(callback_query: types.CallbackQuery):
         )
         
         # Сохраняем данные в базе о том, что пользователь получил код и его IP
-        await conn = await get_db_connection()
+        conn = await get_db_connection()
         await conn.execute("INSERT INTO used_codes (user_id, code, ip_address) VALUES ($1, $2, $3)", user_id, code, ip_address)
         await conn.close()
     else:
