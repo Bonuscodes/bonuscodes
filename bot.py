@@ -76,14 +76,31 @@ async def create_tables():
     ''')
     await conn.close()
 
-# Функция для получения уникального кода
-async def get_unique_code():
+# Функция для получения всех кодов
+async def get_all_codes():
     conn = await get_db_connection()
-    code = await conn.fetchval("SELECT code FROM codes LIMIT 1")  # Получаем первый доступный код
-    if code:
-        await conn.execute("DELETE FROM codes WHERE code = $1", code)  # Удаляем код из базы после выдачи
+    codes = await conn.fetch("SELECT code, site_url FROM codes")
     await conn.close()
-    return code
+    return codes
+
+# Функция для добавления нового кода
+async def add_code_to_db(code: str, site_url: str):
+    conn = await get_db_connection()
+    # Проверяем, если код уже существует
+    existing_code = await conn.fetchval("SELECT 1 FROM codes WHERE code = $1", code)
+    if existing_code:
+        await conn.close()
+        return False  # Код уже существует
+    await conn.execute("INSERT INTO codes (code, site_url) VALUES ($1, $2)", code, site_url)
+    await conn.close()
+    return True
+
+# Функция для удаления кода
+async def delete_code_from_db(code: str):
+    conn = await get_db_connection()
+    deleted_count = await conn.execute("DELETE FROM codes WHERE code = $1", code)
+    await conn.close()
+    return deleted_count > 0
 
 # Состояния для машины состояний
 class Form(StatesGroup):
@@ -101,21 +118,61 @@ async def start_command(message: types.Message):
         reply_markup=keyboard
     )
 
-# Обработчик callback на кнопку получения кода
-@dp.callback_query_handler(text="get_code")
-async def send_code(callback_query: types.CallbackQuery):
-    user_id = callback_query.from_user.id
-    code = await get_unique_code()
+# Обработчик команды /list_codes
+@dp.message_handler(commands=["list_codes"])
+async def list_codes(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        await message.reply("У вас нет прав для выполнения этой команды.")
+        return
 
-    if code:
-        await callback_query.message.reply(
-            f"Ваш уникальный код: {code} 🎟️\n\n"
-            "Этот код больше не доступен для получения повторно."
-        )
+    codes = await get_all_codes()
+    if codes:
+        codes_text = "\n".join([f"Код: {code['code']}, URL: {code['site_url']}" for code in codes])
+        await message.reply(f"Список всех кодов:\n\n{codes_text}")
     else:
-        await callback_query.message.reply(
-            "Извините, все коды были выданы. Пожалуйста, попробуйте позже."
-        )
+        await message.reply("Нет кодов в базе данных.")
+
+# Обработчик команды /add_code
+@dp.message_handler(commands=["add_code"])
+async def add_code(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        await message.reply("У вас нет прав для выполнения этой команды.")
+        return
+
+    # Парсим команду для добавления
+    parts = message.text.split(" ", 2)
+    if len(parts) < 3:
+        await message.reply("Использование: /add_code <код> <URL>")
+        return
+
+    code, site_url = parts[1], parts[2]
+    success = await add_code_to_db(code, site_url)
+
+    if success:
+        await message.reply(f"Код {code} успешно добавлен.")
+    else:
+        await message.reply(f"Код {code} уже существует в базе данных.")
+
+# Обработчик команды /delete_code
+@dp.message_handler(commands=["delete_code"])
+async def delete_code(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        await message.reply("У вас нет прав для выполнения этой команды.")
+        return
+
+    # Парсим команду для удаления
+    parts = message.text.split(" ", 1)
+    if len(parts) < 2:
+        await message.reply("Использование: /delete_code <код>")
+        return
+
+    code = parts[1]
+    success = await delete_code_from_db(code)
+
+    if success:
+        await message.reply(f"Код {code} успешно удален.")
+    else:
+        await message.reply(f"Код {code} не найден в базе данных.")
 
 # Вебхук для приема обновлений
 WEBHOOK_PATH = '/webhook'
@@ -133,13 +190,10 @@ async def webhook(request):
 if __name__ == "__main__":
     # Создаем таблицы при старте
     asyncio.run(create_tables())
-
-    # Удаляем старый вебхук (если был)
-    asyncio.run(bot.delete_webhook())
-
-    # Устанавливаем новый вебхук
+    
+    # Устанавливаем вебхук
     asyncio.run(bot.set_webhook(WEBHOOK_URL + "/webhook"))
-
+    
     # Запуск приложения с обработкой вебхуков
     app = web.Application()
     app.router.add_post(WEBHOOK_PATH, webhook)
