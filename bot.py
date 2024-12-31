@@ -126,6 +126,8 @@ async def check_code_given(user_id: int):
 # Команды для администратора
 @dp.message_handler(commands=["add_code"], user_id=ADMIN_IDS)
 async def add_code(message: types.Message):
+    logger.debug(f"Received add_code command from admin {message.from_user.id}")
+    
     # Получение кода и URL сайта от администратора
     parts = message.text.split(" ", 2)
     if len(parts) < 3:
@@ -142,6 +144,8 @@ async def add_code(message: types.Message):
 
 @dp.message_handler(commands=["show_codes"], user_id=ADMIN_IDS)
 async def show_codes(message: types.Message):
+    logger.debug(f"Received show_codes command from admin {message.from_user.id}")
+    
     conn = await get_db_connection()
     codes = await conn.fetch("SELECT * FROM codes")
     await conn.close()
@@ -155,6 +159,8 @@ async def show_codes(message: types.Message):
 
 @dp.message_handler(commands=["delete_code"], user_id=ADMIN_IDS)
 async def delete_code(message: types.Message):
+    logger.debug(f"Received delete_code command from admin {message.from_user.id}")
+    
     parts = message.text.split(" ", 1)
     if len(parts) < 2:
         await message.reply("Использование: /delete_code <код>")
@@ -174,6 +180,8 @@ async def delete_code(message: types.Message):
 # Обработчик команды /start
 @dp.message_handler(commands=["start"])
 async def start_command(message: types.Message):
+    logger.debug(f"Received /start command from user {message.from_user.id}")
+    
     keyboard = InlineKeyboardMarkup()
     keyboard.add(InlineKeyboardButton("Получить код 🎟️", callback_data="get_code"))
     await message.reply(
@@ -187,6 +195,8 @@ async def start_command(message: types.Message):
 async def send_code(callback_query: types.CallbackQuery):
     user_id = callback_query.from_user.id
     ip_address = str(callback_query.message.chat.id)  # Преобразуем chat.id в строку
+    
+    logger.debug(f"User {user_id} clicked on 'get_code'. IP: {ip_address}")
     
     # Проверка подписки на канал
     is_subscribed = await check_subscription(user_id)
