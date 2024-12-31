@@ -15,6 +15,7 @@ API_TOKEN = os.getenv('API_TOKEN')
 admin_ids_str = os.getenv('ADMIN_IDS', '')
 ADMIN_IDS = [int(id.strip()) for id in admin_ids_str.split(',') if id.strip()]
 CHANNEL_ID = os.getenv('CHANNEL_ID')  # Канал для проверки подписки
+CHANNEL_LINK = "https://t.me/YourChannelName"  # Ссылка на ваш канал
 DB_USER = os.getenv('DB_USER')
 DB_PASSWORD = os.getenv('DB_PASSWORD')
 DB_NAME = os.getenv('DB_NAME')
@@ -79,11 +80,11 @@ async def create_tables():
 
 async def get_unique_code():
     conn = await get_db_connection()
-    code = await conn.fetchval("SELECT code FROM codes LIMIT 1")  # Получаем первый доступный код
-    if code:
-        await conn.execute("DELETE FROM codes WHERE code = $1", code)  # Удаляем код из базы после выдачи
+    result = await conn.fetchrow("SELECT code, site_url FROM codes LIMIT 1")  # Получаем первый доступный код и сайт
+    if result:
+        await conn.execute("DELETE FROM codes WHERE code = $1", result['code'])  # Удаляем код из базы после выдачи
     await conn.close()
-    return code
+    return result
 
 # Состояния для машины состояний
 class Form(StatesGroup):
@@ -176,7 +177,8 @@ async def send_code(callback_query: types.CallbackQuery):
     is_subscribed = await check_subscription(user_id)
     if not is_subscribed:
         await callback_query.message.reply(
-            "Для получения кода необходимо подписаться на канал!"
+            f"Для получения кода необходимо подписаться на канал! 🎉\n\n"
+            f"Подпишитесь на канал: {CHANNEL_LINK}"
         )
         return
 
@@ -197,11 +199,15 @@ async def send_code(callback_query: types.CallbackQuery):
         )
         return
 
-    # Выдача уникального кода
-    code = await get_unique_code()
-    if code:
+    # Выдача уникального кода и сайта
+    result = await get_unique_code()
+    if result:
+        code = result['code']
+        site_url = result['site_url']
+        
         await callback_query.message.reply(
             f"Ваш уникальный код: {code} 🎟️\n\n"
+            f"Сайт для использования кода: {site_url}\n\n"
             "Этот код больше не доступен для получения повторно."
         )
         
