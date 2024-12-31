@@ -109,10 +109,10 @@ async def check_subscription(user_id: int):
         return False
 
 # Проверка, был ли использован IP-адрес
-async def check_ip(user_id: int, ip_address: str):
+async def check_ip(ip_address: str):
     conn = await get_db_connection()
     ip_address = str(ip_address)  # Преобразуем IP-адрес в строку
-    exists = await conn.fetchval("SELECT 1 FROM used_codes WHERE user_id = $1 AND ip_address = $2", user_id, ip_address)
+    exists = await conn.fetchval("SELECT 1 FROM used_codes WHERE ip_address = $1", ip_address)
     await conn.close()
     return exists is not None
 
