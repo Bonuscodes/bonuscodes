@@ -65,13 +65,14 @@ async def create_tables():
         )
     ''')
     await conn.execute(''' 
-        CREATE TABLE IF NOT EXISTS used_ips (
+        CREATE TABLE IF NOT EXISTS used_codes (
             user_id INTEGER PRIMARY KEY,
+            code TEXT,
             ip_address TEXT
         )
     ''')
     await conn.execute(''' 
-        CREATE INDEX IF NOT EXISTS idx_used_ips_user_id ON used_ips (user_id);
+        CREATE INDEX IF NOT EXISTS idx_used_codes_user_id ON used_codes (user_id);
     ''')
     await conn.execute(''' 
         CREATE INDEX IF NOT EXISTS idx_codes_code ON codes (code);
@@ -111,7 +112,14 @@ async def check_subscription(user_id: int):
 async def check_ip(user_id: int, ip_address: str):
     conn = await get_db_connection()
     ip_address = str(ip_address)  # Преобразуем IP-адрес в строку
-    exists = await conn.fetchval("SELECT 1 FROM used_ips WHERE user_id = $1 AND ip_address = $2", user_id, ip_address)
+    exists = await conn.fetchval("SELECT 1 FROM used_codes WHERE user_id = $1 AND ip_address = $2", user_id, ip_address)
+    await conn.close()
+    return exists is not None
+
+# Проверка, был ли выдан код этому пользователю
+async def check_code_given(user_id: int):
+    conn = await get_db_connection()
+    exists = await conn.fetchval("SELECT 1 FROM used_codes WHERE user_id = $1", user_id)
     await conn.close()
     return exists is not None
 
@@ -190,19 +198,10 @@ async def send_code(callback_query: types.CallbackQuery):
         return
 
     # Проверка, получил ли пользователь уже код
-    conn = await get_db_connection()
-    already_received = await conn.fetchval("SELECT 1 FROM used_ips WHERE user_id = $1", user_id)
+    already_received = await check_code_given(user_id)
     if already_received:
         await callback_query.message.reply(
             "Вы уже получили свой код!"
-        )
-        return
-
-    # Проверка на уникальность IP-адреса
-    ip_exists = await check_ip(user_id, ip_address)
-    if ip_exists:
-        await callback_query.message.reply(
-            "С этого IP-адреса уже был выдан код. Попробуйте с другого устройства!"
         )
         return
 
@@ -219,7 +218,8 @@ async def send_code(callback_query: types.CallbackQuery):
         )
         
         # Сохраняем данные в базе о том, что пользователь получил код и его IP
-        await conn.execute("INSERT INTO used_ips (user_id, ip_address) VALUES ($1, $2)", user_id, ip_address)
+        await conn = await get_db_connection()
+        await conn.execute("INSERT INTO used_codes (user_id, code, ip_address) VALUES ($1, $2, $3)", user_id, code, ip_address)
         await conn.close()
     else:
         await callback_query.message.reply(
