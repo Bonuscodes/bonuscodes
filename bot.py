@@ -2,14 +2,14 @@ import asyncpg
 import logging
 import os
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import ParseMode, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiohttp import web
-from urllib.parse import urlparse
 import asyncio
 
+# Загрузка переменных из окружения
 API_TOKEN = os.getenv('API_TOKEN')
 admin_ids_str = os.getenv('ADMIN_IDS', '')
 ADMIN_IDS = [int(id.strip()) for id in admin_ids_str.split(',') if id.strip()]
@@ -20,6 +20,7 @@ DB_NAME = os.getenv('DB_NAME')
 DB_HOST = os.getenv('DB_HOST', 'localhost')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 
+# Проверки на обязательные параметры
 if not API_TOKEN:
     raise ValueError("Не задан API_TOKEN")
 if not ADMIN_IDS:
@@ -44,6 +45,7 @@ dp.middleware.setup(LoggingMiddleware())
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+# Функции для работы с базой данных
 async def get_db_connection():
     return await asyncpg.connect(
         user=DB_USER,
@@ -74,6 +76,7 @@ async def create_tables():
     ''')
     await conn.close()
 
+# Функция для получения уникального кода
 async def get_unique_code():
     conn = await get_db_connection()
     code = await conn.fetchval("SELECT code FROM codes LIMIT 1")  # Получаем первый доступный код
@@ -82,10 +85,12 @@ async def get_unique_code():
     await conn.close()
     return code
 
+# Состояния для машины состояний
 class Form(StatesGroup):
     waiting_for_code = State()
     waiting_for_site = State()
 
+# Обработчик команды /start
 @dp.message_handler(commands=["start"])
 async def start_command(message: types.Message):
     keyboard = InlineKeyboardMarkup()
@@ -96,6 +101,7 @@ async def start_command(message: types.Message):
         reply_markup=keyboard
     )
 
+# Обработчик callback на кнопку получения кода
 @dp.callback_query_handler(text="get_code")
 async def send_code(callback_query: types.CallbackQuery):
     user_id = callback_query.from_user.id
@@ -111,6 +117,7 @@ async def send_code(callback_query: types.CallbackQuery):
             "Извините, все коды были выданы. Пожалуйста, попробуйте позже."
         )
 
+# Вебхук для приема обновлений
 WEBHOOK_PATH = '/webhook'
 
 async def webhook(request):
@@ -124,8 +131,8 @@ async def webhook(request):
         return web.Response(status=500)
 
 if __name__ == "__main__":
-    asyncio.run(create_tables())
-    asyncio.run(bot.set_webhook(WEBHOOK_URL + WEBHOOK_PATH))
+    asyncio.run(create_tables())  # Создаем таблицы при старте
+    asyncio.run(bot.set_webhook(WEBHOOK_URL + WEBHOOK_PATH))  # Устанавливаем вебхук
 
     app = web.Application()
     app.router.add_post(WEBHOOK_PATH, webhook)
