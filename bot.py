@@ -66,7 +66,7 @@ async def create_tables():
     ''')
     await conn.execute(''' 
         CREATE TABLE IF NOT EXISTS used_codes (
-            user_id INTEGER PRIMARY KEY,
+            user_id BIGINT PRIMARY KEY,  # Заменили INTEGER на BIGINT
             code TEXT,
             ip_address TEXT
         )
