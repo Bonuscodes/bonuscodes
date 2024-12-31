@@ -8,12 +8,13 @@ from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiohttp import web
 import asyncio
+from aiogram.utils.exceptions import ChatNotFound
 
 # Загрузка переменных из окружения
 API_TOKEN = os.getenv('API_TOKEN')
 admin_ids_str = os.getenv('ADMIN_IDS', '')
 ADMIN_IDS = [int(id.strip()) for id in admin_ids_str.split(',') if id.strip()]
-CHANNEL_ID = os.getenv('CHANNEL_ID')
+CHANNEL_ID = os.getenv('CHANNEL_ID')  # Канал для проверки подписки
 DB_USER = os.getenv('DB_USER')
 DB_PASSWORD = os.getenv('DB_PASSWORD')
 DB_NAME = os.getenv('DB_NAME')
@@ -42,7 +43,7 @@ storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 dp.middleware.setup(LoggingMiddleware())
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # Функции для работы с базой данных
@@ -76,7 +77,6 @@ async def create_tables():
     ''')
     await conn.close()
 
-# Функция для получения уникального кода
 async def get_unique_code():
     conn = await get_db_connection()
     code = await conn.fetchval("SELECT code FROM codes LIMIT 1")  # Получаем первый доступный код
@@ -89,6 +89,71 @@ async def get_unique_code():
 class Form(StatesGroup):
     waiting_for_code = State()
     waiting_for_site = State()
+
+# Проверка подписки на канал
+async def check_subscription(user_id: int):
+    try:
+        member = await bot.get_chat_member(CHANNEL_ID, user_id)
+        if member.status in ['member', 'administrator', 'creator']:
+            return True
+        return False
+    except ChatNotFound:
+        return False
+
+# Проверка IP-адреса
+async def check_ip(user_id: int, ip_address: str):
+    conn = await get_db_connection()
+    exists = await conn.fetchval("SELECT 1 FROM used_ips WHERE user_id = $1 AND ip_address = $2", user_id, ip_address)
+    await conn.close()
+    return exists is not None
+
+# Команды для администратора
+@dp.message_handler(commands=["add_code"], user_id=ADMIN_IDS)
+async def add_code(message: types.Message):
+    # Получение кода и URL сайта от администратора
+    parts = message.text.split(" ", 2)
+    if len(parts) < 3:
+        await message.reply("Использование: /add_code <код> <сайт>")
+        return
+    
+    code, site_url = parts[1], parts[2]
+    
+    conn = await get_db_connection()
+    await conn.execute("INSERT INTO codes (code, site_url) VALUES ($1, $2)", code, site_url)
+    await conn.close()
+    
+    await message.reply(f"Код {code} успешно добавлен!")
+
+@dp.message_handler(commands=["show_codes"], user_id=ADMIN_IDS)
+async def show_codes(message: types.Message):
+    conn = await get_db_connection()
+    codes = await conn.fetch("SELECT * FROM codes")
+    await conn.close()
+
+    if not codes:
+        await message.reply("Нет доступных кодов.")
+        return
+
+    code_list = "\n".join([f"Код: {code['code']} - Сайт: {code['site_url']}" for code in codes])
+    await message.reply(f"Список кодов:\n{code_list}")
+
+@dp.message_handler(commands=["delete_code"], user_id=ADMIN_IDS)
+async def delete_code(message: types.Message):
+    parts = message.text.split(" ", 1)
+    if len(parts) < 2:
+        await message.reply("Использование: /delete_code <код>")
+        return
+    
+    code = parts[1]
+    
+    conn = await get_db_connection()
+    result = await conn.execute("DELETE FROM codes WHERE code = $1", code)
+    await conn.close()
+    
+    if result == "DELETE 0":
+        await message.reply(f"Код {code} не найден.")
+    else:
+        await message.reply(f"Код {code} успешно удален!")
 
 # Обработчик команды /start
 @dp.message_handler(commands=["start"])
@@ -105,80 +170,48 @@ async def start_command(message: types.Message):
 @dp.callback_query_handler(text="get_code")
 async def send_code(callback_query: types.CallbackQuery):
     user_id = callback_query.from_user.id
-    logger.info(f"Получение кода для пользователя {user_id}")
+    ip_address = callback_query.message.chat.id  # Получаем IP-адрес (замените на соответствующий способ)
+    
+    # Проверка подписки на канал
+    is_subscribed = await check_subscription(user_id)
+    if not is_subscribed:
+        await callback_query.message.reply(
+            "Для получения кода необходимо подписаться на канал!"
+        )
+        return
 
+    # Проверка, получил ли пользователь уже код
+    conn = await get_db_connection()
+    already_received = await conn.fetchval("SELECT 1 FROM used_ips WHERE user_id = $1", user_id)
+    if already_received:
+        await callback_query.message.reply(
+            "Вы уже получили свой код!"
+        )
+        return
+
+    # Проверка на уникальность IP-адреса
+    ip_exists = await check_ip(user_id, ip_address)
+    if ip_exists:
+        await callback_query.message.reply(
+            "С этого IP-адреса уже был выдан код. Попробуйте с другого устройства!"
+        )
+        return
+
+    # Выдача уникального кода
     code = await get_unique_code()
-
-    logger.info(f"Код для пользователя {user_id}: {code}")
-
     if code:
         await callback_query.message.reply(
             f"Ваш уникальный код: {code} 🎟️\n\n"
             "Этот код больше не доступен для получения повторно."
         )
+        
+        # Сохраняем данные в базе о том, что пользователь получил код и его IP
+        await conn.execute("INSERT INTO used_ips (user_id, ip_address) VALUES ($1, $2)", user_id, ip_address)
+        await conn.close()
     else:
         await callback_query.message.reply(
             "Извините, все коды были выданы. Пожалуйста, попробуйте позже."
         )
-
-# Команда для администраторов: Добавить код
-@dp.message_handler(commands=['add_code'])
-async def add_code(message: types.Message):
-    if message.from_user.id not in ADMIN_IDS:
-        await message.reply("У вас нет прав для добавления кода.")
-        return
-
-    # Получаем аргумент (код и URL сайта)
-    try:
-        text = message.text.strip().split(maxsplit=1)[1]
-        code, site_url = text.split(',')
-        conn = await get_db_connection()
-        await conn.execute("INSERT INTO codes (code, site_url) VALUES ($1, $2)", code, site_url)
-        await conn.close()
-        await message.reply(f"Код {code} успешно добавлен!")
-    except IndexError:
-        await message.reply("Ошибка! Использование: /add_code <код>, <сайт>")
-    except ValueError:
-        await message.reply("Ошибка! Формат должен быть: <код>, <сайт>")
-
-# Команда для администраторов: Просмотр всех кодов
-@dp.message_handler(commands=['view_codes'])
-async def view_codes(message: types.Message):
-    if message.from_user.id not in ADMIN_IDS:
-        await message.reply("У вас нет прав для просмотра кодов.")
-        return
-
-    conn = await get_db_connection()
-    rows = await conn.fetch("SELECT code, site_url FROM codes")
-    await conn.close()
-
-    if rows:
-        codes_list = "\n".join([f"{row['code']} - {row['site_url']}" for row in rows])
-        await message.reply(f"Все коды:\n{codes_list}")
-    else:
-        await message.reply("Нет доступных кодов.")
-
-# Команда для администраторов: Удалить код
-@dp.message_handler(commands=['delete_code'])
-async def delete_code(message: types.Message):
-    if message.from_user.id not in ADMIN_IDS:
-        await message.reply("У вас нет прав для удаления кода.")
-        return
-
-    # Получаем код для удаления
-    try:
-        code = message.text.strip().split(maxsplit=1)[1]
-        conn = await get_db_connection()
-        result = await conn.fetch("DELETE FROM codes WHERE code = $1 RETURNING code", code)
-
-        if result:
-            await conn.close()
-            await message.reply(f"Код {code} успешно удален.")
-        else:
-            await conn.close()
-            await message.reply(f"Код {code} не найден.")
-    except IndexError:
-        await message.reply("Ошибка! Использование: /delete_code <код>")
 
 # Вебхук для приема обновлений
 WEBHOOK_PATH = '/webhook'
@@ -194,10 +227,11 @@ async def webhook(request):
         return web.Response(status=500)
 
 if __name__ == "__main__":
-    asyncio.run(create_tables())  # Создаем таблицы при старте
+    # Создаем таблицы при старте
+    asyncio.run(create_tables())
     
     # Устанавливаем вебхук
-    asyncio.run(bot.set_webhook(WEBHOOK_URL + "/webhook"))  # Устанавливаем вебхук
+    asyncio.run(bot.set_webhook(WEBHOOK_URL + "/webhook"))
     
     # Запуск приложения с обработкой вебхуков
     app = web.Application()
