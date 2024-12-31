@@ -236,6 +236,12 @@ async def send_code(callback_query: types.CallbackQuery):
             "Извините, все коды были выданы. Пожалуйста, попробуйте позже."
         )
 
+# Универсальный обработчик для всех сообщений
+@dp.message_handler()
+async def handle_all_messages(message: types.Message):
+    logger.debug(f"Received unhandled message: {message}")
+    await message.reply("Это универсальный обработчик. Мы работаем над улучшением!")
+
 # Вебхук для приема обновлений
 WEBHOOK_PATH = '/webhook'
 
